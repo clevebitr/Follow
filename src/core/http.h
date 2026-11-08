@@ -1,0 +1,31 @@
+#ifndef HTTP_H
+#define HTTP_H
+
+#include <stddef.h>
+#include <curl/curl.h>
+
+
+typedef struct {
+    char  *body;                 /* 响应正文，NUL 结尾；用 http_response_free 释放 */
+    size_t length;               /* 正文字节数（不含结尾 NUL） */
+    long   status;               /* HTTP 状态码，0 表示传输层就没成功 */
+    char   error[CURL_ERROR_SIZE];   /* 失败原因，成功时为空串 */
+} HttpResponse;
+
+/* 进程内调用一次：main() 开头 / 所有线程启动之前。成功返回 0 */
+int  http_global_init(void);
+
+/* 进程内调用一次：main() 结尾。 */
+void http_global_cleanup(void);
+
+/*
+ * 同步 GET。成功返回 0（此时仍要看 resp->status 判断 2xx/4xx/5xx）。
+ * timeout_sec <= 0 时使用默认 15 秒。
+ * 无论成功失败，resp 里的 body（可能为 ""）都要用 http_response_free 释放。
+ */
+int  http_get(const char *url, HttpResponse *resp, long timeout_sec);
+
+/* 释放 body 并把结构体清零，可重复调用 */
+void http_response_free(HttpResponse *resp);
+
+#endif

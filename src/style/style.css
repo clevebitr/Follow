@@ -1,0 +1,186 @@
+
+window.csd,
+window.background {
+  border: none;
+  border-width: 0;
+  border-radius: 0;
+  background-color: #303446;  
+  background-image: none;
+  color: #c6d0f5;
+}
+
+window.csd,
+window.csd decoration {
+  box-shadow: none;
+}
+
+window.csd:backdrop {
+  background-color: #303446;
+  box-shadow: none;
+}
+
+
+headerbar {
+  background-color: #303446;
+  background-image: none;
+  color: #c6d0f5;
+
+  border: none;
+  border-bottom: 1px solid #51576d;
+
+  min-height: 0;
+  padding: 0 8px;
+  margin: 0;
+  box-shadow: none;
+}
+
+headerbar label,
+headerbar .title {
+  color: #c6d0f5;
+  font-weight: 500;
+}
+
+headerbar > windowhandle {
+  padding: 0;
+  margin: 0;
+  min-height: 0;
+}
+
+headerbar button {
+  min-height: 0;
+  min-width: 0;
+  padding: 2px 6px;
+  margin: 0;
+  color: #c6d0f5;
+}
+
+
+headerbar windowcontrols button.minimize,
+headerbar windowcontrols button.maximize,
+headerbar windowcontrols button.close {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+
+  color: #ffffff;        /* symbolic icon 直接吃 color */
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  margin: 0 2px;
+}
+
+headerbar windowcontrols button > image {
+  background-color: transparent;
+  background-image: none;
+  color: #ffffff;
+  padding: 0;
+  margin: 0;
+}
+
+headerbar windowcontrols button.minimize:hover,
+headerbar windowcontrols button.maximize:hover,
+headerbar windowcontrols button.close:hover {
+  background-color: rgba(198, 208, 245, 0.12);
+  color: #ffffff;
+}
+
+headerbar windowcontrols button:hover > image {
+  background-color: transparent;
+  color: #ffffff;
+}
+
+headerbar windowcontrols button:active {
+  background-color: rgba(198, 208, 245, 0.20);
+  color: #ffffff;
+}
+
+/* ============ 进度条 GtkScale：只有一根长条，没有把手 ============ */
+
+/* 控件本体：不画任何东西，只负责布局 */
+scale {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* 轨道：一条细长的圆角矩形 */
+scale > trough {
+  min-width: 4px;
+  min-height: 4px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background-color: #414559;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* 已播放部分 */
+scale > trough > highlight {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background-color: #8caaee;
+  background-image: none;
+  box-shadow: none;
+}
+
+/* fill 节点（只有 fill-level 才会用到）：保持透明，避免多出一块色 */
+scale > trough > fill {
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+/* 把手 slider：不画、不占位，悬停/按下/聚焦也不出现 */
+scale > trough > slider,
+scale:hover > trough > slider,
+scale:active > trough > slider,
+scale:focus > trough > slider,
+scale:focus-within > trough > slider,
+scale:disabled > trough > slider {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+  opacity: 0;
+}
+
+/* 键盘聚焦时不要外圈光圈 */
+scale:focus > trough,
+scale:focus-within > trough {
+  outline: none;
+  box-shadow: none;
+}
+
+/* 未加载音轨时（insensitive）整条变暗 */
+scale:disabled > trough {
+  background-color: #3a3e4e;
+}
+
+scale:disabled > trough > highlight {
+  background-color: #6b7089;
+}
