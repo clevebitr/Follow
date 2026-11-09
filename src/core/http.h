@@ -10,6 +10,7 @@ typedef struct {
     size_t length;               /* 正文字节数（不含结尾 NUL） */
     long   status;               /* HTTP 状态码，0 表示传输层就没成功 */
     char   error[CURL_ERROR_SIZE];   /* 失败原因，成功时为空串 */
+    char  *final_url;            /* 跟完重定向后的最终地址（b23.tv 短链要用），可能为 NULL */
 } HttpResponse;
 
 /* 进程内调用一次：main() 开头 / 所有线程启动之前。成功返回 0 */
@@ -25,7 +26,14 @@ void http_global_cleanup(void);
  */
 int  http_get(const char *url, HttpResponse *resp, long timeout_sec);
 
+/*
+ * 同上，但可以带额外请求头（每行一个 "Key: Value"，CRLF 或 LF 分隔）。
+ * B 站这类接口不带 Referer/UA 会被挡。headers 可以为 NULL。
+ */
+int  http_get_with_headers(const char *url, const char *headers,
+                           HttpResponse *resp, long timeout_sec);
+
 /* 释放 body 并把结构体清零，可重复调用 */
 void http_response_free(HttpResponse *resp);
 
-#endif
+#endif /* HTTP_H */

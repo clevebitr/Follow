@@ -4,6 +4,10 @@
 
 #include "http.h"
 
+#define FOLLOW_USER_AGENT \
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
 typedef struct {
     char  *data;
     size_t len;
@@ -47,11 +51,13 @@ void http_global_cleanup(void)
     curl_global_cleanup();
 }
 
-int http_get(const char *url, HttpResponse *resp, long timeout_sec)
+int http_get_with_headers(const char *url, const char *headers,
+                          HttpResponse *resp, long timeout_sec)
 {
-    Buffer   buf = {0};
-    CURL    *curl;
-    CURLcode rc;
+    Buffer            buf = {0};
+    CURL             *curl;
+    CURLcode          rc;
+    struct curl_slist *list = NULL;
 
     if (url == NULL || resp == NULL)
         return -1;
@@ -74,9 +80,26 @@ int http_get(const char *url, HttpResponse *resp, long timeout_sec)
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_sec > 0 ? timeout_sec : 15L);
 
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Follow/0.1 (libcurl)");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, FOLLOW_USER_AGENT);
 
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, resp->error);
+
+    if (headers != NULL && *headers != '\0') {
+        char *copy = strdup(headers);
+        char *save = NULL;
+        char *line;
+
+        for (line = strtok_r(copy, "\r\n", &save); line != NULL;
+             line = strtok_r(NULL, "\r\n", &save)) {
+            if (*line != '\0')
+                list = curl_slist_append(list, line);
+        }
+
+        free(copy);
+
+        if (list != NULL)
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
+    }
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
@@ -84,6 +107,18 @@ int http_get(const char *url, HttpResponse *resp, long timeout_sec)
     rc = curl_easy_perform(curl);
 
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp->status);
+
+    {
+        char *effective = NULL;
+
+        curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective);
+        if (effective != NULL)
+            resp->final_url = strdup(effective);
+    }
+
+    if (list != NULL)
+        curl_slist_free_all(list);
+
     curl_easy_cleanup(curl);
 
     resp->body   = buf.data ? buf.data : (char *)calloc(1, 1);
@@ -98,11 +133,17 @@ int http_get(const char *url, HttpResponse *resp, long timeout_sec)
     return 0;
 }
 
+int http_get(const char *url, HttpResponse *resp, long timeout_sec)
+{
+    return http_get_with_headers(url, NULL, resp, timeout_sec);
+}
+
 void http_response_free(HttpResponse *resp)
 {
     if (resp == NULL)
         return;
 
     free(resp->body);
+    free(resp->final_url);
     memset(resp, 0, sizeof(*resp));
 }

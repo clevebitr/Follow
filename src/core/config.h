@@ -15,12 +15,25 @@
 typedef struct {
     gchar   *id;          /* 组名，如 "audio1" */
     gchar   *link;        /* 音频：本地路径 或 http(s) URL，必有 */
+    gchar   *title;       /* 曲名：可为 NULL（从文件名推断） */
+    gchar   *artist;      /* 艺人：可为 NULL */
     gchar   *pic;         /* 封面：可为 NULL */
-    gchar   *lrc;         /* 歌词：可为 NULL */
+    gchar   *lrc;         /* 歌词：本地 .lrc / netease:... / qq:...，可为 NULL */
+    gint     lrc_offset_ms; /* 歌词整体偏移（毫秒）：正数 = 歌词延后 */
+    gchar   *page;        /* 平台页面链接（二维码 + 徽标用）：可为 NULL */
+    gchar   *note;        /* 这首歌的备注（覆盖 [note] text），可为 NULL */
+    gchar   *platform;    /* 平台短名，可为 NULL（缺省按 page 的域名自动识别） */
     gboolean link_remote;
     gboolean pic_remote;
     gboolean lrc_remote;
 } AudioTrack;
+
+/* 循环模式 */
+typedef enum {
+    REPEAT_OFF = 0,     /* 放到列表末尾就停 */
+    REPEAT_ALL,         /* 列表循环 */
+    REPEAT_ONE          /* 单曲循环 */
+} RepeatMode;
 
 typedef struct {
     gint     width;
@@ -28,6 +41,12 @@ typedef struct {
     gboolean fullscreen;
     gchar   *title;
     gchar   *qrcode_link;
+    gchar   *qrcode_label;   /* 自定义链接胶囊上的文字，可为 NULL */
+    gchar   *note;           /* [note] text= 全局备注：可为 NULL */
+
+    /* [playback] 播放偏好 */
+    gint     repeat;        /* RepeatMode */
+    gboolean shuffle;
 
     /* [audio1], [audio2] ... 按数字顺序排好的曲目表 */
     AudioTrack *tracks;
@@ -47,8 +66,20 @@ void config_free(void);
 /* 写一份默认配置（含音频段示例），用于首次运行时生成模板。 */
 void config_save_default(const char *path);
 
+/* 备注文字：曲目自己的 note 优先，否则用全局 [note] text；都没有返回 NULL */
+const gchar *config_track_note(const APPconfig *cfg, const AudioTrack *track);
+
+/* 循环模式的短名："off" / "all" / "one" */
+const gchar *config_repeat_name(gint repeat);
+
 /* 取第 index 个曲目；越界返回 NULL。 */
 const AudioTrack *config_track_at(const APPconfig *cfg, gsize index);
+
+/* 显示用曲名：title 键优先，其次从文件名/main.exe 里推断；返回新分配的字符串。 */
+gchar *config_track_title(const AudioTrack *track);
+
+/* 显示用「艺人 - 曲名」；没有 artist 时只返回曲名。返回新分配的字符串。 */
+gchar *config_track_label(const AudioTrack *track);
 
 /* uri 是不是 http/https 远程地址（没有 scheme 的按本地路径处理）。 */
 gboolean config_is_remote(const gchar *uri);

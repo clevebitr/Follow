@@ -3,38 +3,83 @@
 
 #include "miniaudio.h"
 
-typedef struct {
-    ma_engine engine;
-    ma_sound  sound;
-    int       ready;     /* 1 = engine 已成功初始化 */
-    int       has_sound; /* 1 = sound 已加载 */
-} Media;
+/* 播放层 = miniaudio 输出设备 + ffmpeg 解码（本地文件和网络流走同一条路）。
+ *
+ * 线程模型：
+ *   解码线程  —— ffmpeg 打开/读取/解码/重采样，把 f32 立体声推进环形缓冲。
+ *                网络 I/O 全在这里，绝不碰音频线程。
+ *   音频线程  —— 只从环形缓冲里搬样本，没有任何锁、没有 I/O。
+ *   UI 线程   —— 只改原子状态（播放/暂停/seek），位置和时长都是原子读。
+ *
+ * 环形缓冲是 SPSC，读写各用原子游标；容量 MEDIA_BUFFER_SECONDS 秒，够吸收网络抖动。
+ */
 
-int media_init(Media *m, ma_context *ctx);
+#define MEDIA_CHANNELS        2
+#define MEDIA_FALLBACK_RATE   48000
+#define MEDIA_BUFFER_SECONDS  3      /* 环形缓冲长度（秒） */
 
-/* 加载并开始播放（会先停掉当前曲目） */
-int media_play(Media *m, const char *path);
+typedef enum {
+    MEDIA_STOPPED = 0,
+    MEDIA_PLAYING,
+    MEDIA_PAUSED,
+    MEDIA_LOADING      /* 正在打开流（网络解析 + 探测） */
+} MediaState;
 
-/* 暂停当前曲目 */
-int media_pause(Media *m);
+typedef struct _Media Media;
 
-/* 继续播放当前曲目 */
-int media_continue(Media *m);
+struct _Media {
+    ma_device  device;
+    ma_uint32  sample_rate;
 
-/* 停止并卸载当前曲目 */
-void media_stop(Media *m);
+    /* 输出环形缓冲（f32 交织立体声） */
+    float     *ring;
+    ma_uint32  ring_frames;     /* 容量（帧） */
+    ma_uint64  ring_write;      /* 原子：写入游标（单调递增） */
+    ma_uint64  ring_read;       /* 原子：读出游标（单调递增） */
 
-/* 当前播放位置 / 总时长，单位秒；没有曲目时返回 0 */
-double media_position(const Media *m);
-double media_duration(const Media *m);
+    /* 状态（原子读写） */
+    int        state;
+    int        finished;
+    int        eof;
+    int        has_stream;
+    ma_uint64  cursor;          /* 已播放帧数 */
+    ma_uint64  length;          /* 总帧数，0 = 未知（直播流） */
 
-/* 跳到指定秒数，成功返回 0 */
-int  media_seek(Media *m, double seconds);
+    /* 解码线程 */
+    GThread   *thread;
+    int        thread_stop;     /* 原子 */
+    int        cmd_load;        /* 原子：1 = 有新的 URL 要打开 */
+    ma_int64   cmd_seek;        /* 原子：>=0 = 要 seek 到的帧号，<0 = 没有 */
+    GMutex     cmd_lock;
+    gchar     *cmd_url;
+    gchar     *cmd_headers;
 
-int  media_is_playing(const Media *m);
-int  media_is_paused(const Media *m);
+    gchar      error[256];
 
+    int        ready;
+};
 
+/* 初始化输出设备 + 启动解码线程 */
+int  media_init(Media *m);
 void media_clear(Media *m);
 
-#endif
+/* 开始播放：url 可以是本地路径或 http(s)，headers 可为 NULL */
+int  media_play(Media *m, const char *url, const char *headers);
+
+int  media_pause(Media *m);
+int  media_continue(Media *m);
+void media_stop(Media *m);
+
+double media_position(Media *m);
+double media_duration(Media *m);
+int    media_seek(Media *m, double seconds);
+
+int  media_is_playing(Media *m);
+int  media_is_paused(Media *m);
+int  media_is_loading(Media *m);
+int  media_is_finished(Media *m);
+
+/* 最近一次加载失败的原因；没有错误返回 NULL */
+const char *media_error(Media *m);
+
+#endif /* MEDIA_H */

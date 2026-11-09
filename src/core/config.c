@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <string.h>
+
 static APPconfig g_config;
 static gboolean  g_loaded = FALSE;
 
@@ -94,8 +96,13 @@ static void audio_track_clear(AudioTrack *track)
 {
     g_free(track->id);
     g_free(track->link);
+    g_free(track->title);
+    g_free(track->artist);
     g_free(track->pic);
     g_free(track->lrc);
+    g_free(track->page);
+    g_free(track->platform);
+    g_free(track->note);
     *track = (AudioTrack){ 0 };
 }
 
@@ -114,12 +121,18 @@ static void config_reset(void)
 
     g_free(g_config.title);
     g_free(g_config.qrcode_link);
+    g_free(g_config.qrcode_label);
+    g_free(g_config.note);
 
     g_config.width       = WINDOW_WIDTH;
     g_config.height      = WINDOW_HEIGHT;
     g_config.fullscreen  = FALSE;
     g_config.title       = g_strdup(WINDOW_TITLE);
     g_config.qrcode_link = g_strdup(QRCODE_LINK);
+    g_config.qrcode_label = NULL;
+    g_config.note        = NULL;
+    g_config.repeat      = REPEAT_ALL;   /* 默认列表循环 */
+    g_config.shuffle     = FALSE;
 }
 
 const APPconfig *config_get(void)
@@ -165,12 +178,20 @@ static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
 
         track->id         = g_strdup(names[i]);
         track->link       = g_steal_pointer(&link);
+        track->title      = config_get_string(kf, names[i], "title");
+        track->artist     = config_get_string(kf, names[i], "artist");
         track->pic        = config_get_string(kf, names[i], "pic");
         track->lrc        = config_get_string(kf, names[i], "lrc");
+        track->lrc_offset_ms = config_get_int(kf, names[i], "lrc_offset", 0);
+        track->page       = config_get_string(kf, names[i], "page");
+        track->note       = config_get_string(kf, names[i], "note");
+        track->platform    = config_get_string(kf, names[i], "platform");
         track->link_remote = config_is_remote(track->link);
         track->pic_remote  = config_is_remote(track->pic);
         track->lrc_remote  = config_is_remote(track->lrc);
 
+        if (track->title != NULL && *track->title == '\0') g_clear_pointer(&track->title, g_free);
+        if (track->artist != NULL && *track->artist == '\0') g_clear_pointer(&track->artist, g_free);
         if (track->pic != NULL && *track->pic == '\0') g_clear_pointer(&track->pic, g_free);
         if (track->lrc != NULL && *track->lrc == '\0') g_clear_pointer(&track->lrc, g_free);
 
@@ -180,12 +201,73 @@ static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
     g_free(names);
 }
 
+const gchar *config_track_note(const APPconfig *cfg, const AudioTrack *track)
+{
+    if (track != NULL && track->note != NULL && *track->note != '\0')
+        return track->note;
+
+    if (cfg != NULL && cfg->note != NULL && *cfg->note != '\0')
+        return cfg->note;
+
+    return NULL;
+}
+
+const gchar *config_repeat_name(gint repeat)
+{
+    switch (repeat) {
+    case REPEAT_OFF: return "off";
+    case REPEAT_ONE: return "one";
+    default:         return "all";
+    }
+}
+
 const AudioTrack *config_track_at(const APPconfig *cfg, gsize index)
 {
     if (cfg == NULL || index >= cfg->n_tracks)
         return NULL;
 
     return &cfg->tracks[index];
+}
+
+gchar *config_track_title(const AudioTrack *track)
+{
+    gchar *base;
+    gchar *query;
+    gchar *dot;
+
+    if (track == NULL)
+        return NULL;
+
+    if (track->title != NULL && *track->title != '\0')
+        return g_strdup(track->title);
+
+    if (track->link == NULL)
+        return g_strdup(track->id != NULL ? track->id : "unknown");
+
+    base = g_path_get_basename(track->link);
+
+    query = strchr(base, '?');         /* 远程 URL 的 query 不要 */
+    if (query != NULL)
+        *query = '\0';
+
+    dot = strrchr(base, '.');          /* 去掉扩展名 */
+    if (dot != NULL && dot != base)
+        *dot = '\0';
+
+    return base;
+}
+
+gchar *config_track_label(const AudioTrack *track)
+{
+    g_autofree gchar *title = config_track_title(track);
+
+    if (track == NULL)
+        return g_strdup("");
+
+    if (track->artist != NULL && *track->artist != '\0' && title != NULL && *title != '\0')
+        return g_strdup_printf("%s - %s", track->artist, title);
+
+    return g_strdup(title != NULL ? title : "");
 }
 
 
@@ -223,6 +305,33 @@ const APPconfig *config_load(const char *path)
         g_config.qrcode_link = g_steal_pointer(&qr);
     }
 
+    {
+        g_autofree gchar *label = config_get_string(kf, "qrcode", "label");
+
+        g_free(g_config.qrcode_label);
+        g_config.qrcode_label = (label != NULL && *label != '\0')
+            ? g_steal_pointer(&label) : NULL;
+    }
+
+    {
+        g_autofree gchar *note = config_get_string(kf, "note", "text");
+
+        g_free(g_config.note);
+        g_config.note = (note != NULL && *note != '\0') ? g_steal_pointer(&note) : NULL;
+    }
+
+    {
+        g_autofree gchar *repeat = config_get_string(kf, "playback", "repeat");
+
+        if (repeat != NULL) {
+            if (g_ascii_strcasecmp(repeat, "off") == 0)        g_config.repeat = REPEAT_OFF;
+            else if (g_ascii_strcasecmp(repeat, "all") == 0)   g_config.repeat = REPEAT_ALL;
+            else if (g_ascii_strcasecmp(repeat, "one") == 0)   g_config.repeat = REPEAT_ONE;
+        }
+
+        g_config.shuffle = config_get_bool(kf, "playback", "shuffle", g_config.shuffle);
+    }
+
     config_load_tracks(kf, &g_config);
 
     g_debug("config: %" G_GSIZE_FORMAT " track(s) loaded", g_config.n_tracks);
@@ -236,6 +345,8 @@ void config_free(void)
 
     g_free(g_config.title);
     g_free(g_config.qrcode_link);
+    g_free(g_config.qrcode_label);
+    g_free(g_config.note);
 
     g_config = (APPconfig){ 0 };
     g_loaded = FALSE;
@@ -252,10 +363,22 @@ void config_save_default(const char *path)
     g_key_file_set_string(key_file, "window", "title", WINDOW_TITLE);
 
     g_key_file_set_string(key_file, "qrcode", "link", QRCODE_LINK);
+    g_key_file_set_string(key_file, "qrcode", "label", "");
+
+    g_key_file_set_comment(key_file, "note", NULL,
+                           " 显示在大播放时间上方的一行备注，可留空  ", NULL);
+    g_key_file_set_string(key_file, "note", "text", "");
+
+    g_key_file_set_string(key_file, "playback", "repeat", "all");
+    g_key_file_set_boolean(key_file, "playback", "shuffle", FALSE);
 
     g_key_file_set_comment(key_file, "audio1", NULL,
                            " 每个 [audioN] 是一项曲目，按 N 从小到大排序  ", NULL);
     g_key_file_set_string(key_file, "audio1", "link", "src/assets/bgm.mp3");
+    g_key_file_set_string(key_file, "audio1", "title", "");
+    g_key_file_set_string(key_file, "audio1", "artist", "");
+    g_key_file_set_string(key_file, "audio1", "page", "");
+    g_key_file_set_string(key_file, "audio1", "platform", "");
     g_key_file_set_string(key_file, "audio1", "pic", "");
     g_key_file_set_string(key_file, "audio1", "lrc", "");
 
