@@ -34,6 +34,27 @@ static void rgb_to_hsv(double r, double g, double b,
         *h += 1.0;
 }
 
+Palette palette_mix(const Palette *a, const Palette *b, double t)
+{
+    Palette out;
+
+    palette_reset(&out);
+
+    if (a == NULL || b == NULL)
+        return a != NULL ? *a : (b != NULL ? *b : out);
+
+    t = CLAMP(t, 0.0, 1.0);
+
+#define MIX(field) out.field = a->field + (b->field - a->field) * t
+    MIX(seed_r); MIX(seed_g); MIX(seed_b);
+    MIX(alt_r);  MIX(alt_g);  MIX(alt_b);
+    MIX(deep_r); MIX(deep_g); MIX(deep_b);
+#undef MIX
+
+    out.has = a->has || b->has;
+    return out;
+}
+
 void palette_reset(Palette *p)
 {
     if (p == NULL)

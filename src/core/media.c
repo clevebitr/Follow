@@ -575,6 +575,7 @@ int media_play(Media *m, const char *url, const char *headers)
     g_mutex_unlock(&m->cmd_lock);
 
     __atomic_store_n(&m->state, MEDIA_LOADING, __ATOMIC_RELEASE);
+    m->error[0] = '\0';        /* 新的一次加载：先清掉上一首留下的错误 */
     __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&m->cursor, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&m->cmd_load, 1, __ATOMIC_RELEASE);
@@ -675,6 +676,21 @@ int media_is_paused(Media *m)
 int media_is_loading(Media *m)
 {
     return m != NULL && __atomic_load_n(&m->state, __ATOMIC_ACQUIRE) == MEDIA_LOADING;
+}
+
+void media_ack_finished(Media *m)
+{
+    if (m != NULL)
+        __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
+}
+
+void media_begin_track(Media *m)
+{
+    if (m == NULL)
+        return;
+
+    m->error[0] = '\0';
+    __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
 }
 
 int media_is_finished(Media *m)

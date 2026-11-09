@@ -63,9 +63,6 @@ const APPconfig *config_get(void);
 /* 释放内部字符串和曲目表，程序退出时调一次即可（可重复调用）。 */
 void config_free(void);
 
-/* 写一份默认配置（含音频段示例），用于首次运行时生成模板。 */
-void config_save_default(const char *path);
-
 /* 备注文字：曲目自己的 note 优先，否则用全局 [note] text；都没有返回 NULL */
 const gchar *config_track_note(const APPconfig *cfg, const AudioTrack *track);
 

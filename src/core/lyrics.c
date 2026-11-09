@@ -114,6 +114,27 @@ static gchar *read_text_file(const char *path)
     return g_steal_pointer(&content);
 }
 
+/* 解析的中间态：按文件顺序的行 + 可能缺失的时间戳（-1）。
+ * 只是本文件内部用，外面只看到排好序、只有带时间戳行的 Lyrics。 */
+typedef struct {
+    GPtrArray *texts;      /* gchar* */
+    GArray    *times;      /* gint64，-1 = 这行没有时间戳 */
+    gchar     *title;
+    gchar     *artist;
+} RawLyrics;
+
+static void raw_free(RawLyrics *raw)
+{
+    if (raw == NULL)
+        return;
+
+    g_ptr_array_unref(raw->texts);
+    g_array_unref(raw->times);
+    g_free(raw->title);
+    g_free(raw->artist);
+    g_free(raw);
+}
+
 /* 从一段文本解析出原始行（time = -1 表示这行没有时间戳） */
 static RawLyrics *raw_from_text(const gchar *content)
 {
@@ -194,34 +215,11 @@ static RawLyrics *raw_from_text(const gchar *content)
     g_strfreev(raw_lines);
 
     if (raw->texts->len == 0) {
-        lyrics_raw_free(raw);
+        raw_free(raw);
         return NULL;
     }
 
     return raw;
-}
-
-RawLyrics *lyrics_read_raw(const char *path)
-{
-    g_autofree gchar *content = NULL;
-
-    content = read_text_file(path);
-    if (content == NULL)
-        return NULL;
-
-    return raw_from_text(content);
-}
-
-void lyrics_raw_free(RawLyrics *raw)
-{
-    if (raw == NULL)
-        return;
-
-    g_ptr_array_unref(raw->texts);
-    g_array_unref(raw->times);
-    g_free(raw->title);
-    g_free(raw->artist);
-    g_free(raw);
 }
 
 static gint compare_lines(const void *a, const void *b, gpointer user_data)
@@ -260,7 +258,7 @@ static Lyrics *lyrics_from_raw(RawLyrics *raw)
         lyrics->n_lines++;
     }
 
-    lyrics_raw_free(raw);
+    raw_free(raw);
 
     if (lyrics->n_lines == 0) {
         lyrics_free(lyrics);
@@ -274,7 +272,9 @@ static Lyrics *lyrics_from_raw(RawLyrics *raw)
 
 Lyrics *lyrics_load_file(const char *path)
 {
-    return lyrics_from_raw(lyrics_read_raw(path));
+    g_autofree gchar *content = read_text_file(path);
+
+    return content != NULL ? lyrics_from_raw(raw_from_text(content)) : NULL;
 }
 
 Lyrics *lyrics_load_text(const gchar *content)

@@ -18,4 +18,7 @@ typedef struct {
 void palette_from_rgba(const guchar *rgba, int width, int height, Palette *out);
 void palette_reset(Palette *p);
 
+/* 两组种子色按 t 插值（换封面时让背景颜色平滑过渡，而不是硬切） */
+Palette palette_mix(const Palette *a, const Palette *b, double t);
+
 #endif /* FOLLOW_PALETTE_H */

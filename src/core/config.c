@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <math.h>
 #include <string.h>
 
 static APPconfig g_config;
@@ -89,6 +90,41 @@ static gchar *config_get_string(GKeyFile *kf, const gchar *group, const gchar *k
     gchar *value = g_key_file_get_string(kf, group, key, &error);
 
     return error ? NULL : value;
+}
+
+/* 歌词偏移：写毫秒或秒都行，也接受后缀。
+ *   2500 / 2500ms / 2.5s  → 2500 毫秒
+ *   -7.5  / -7.5s         → -7500 毫秒
+ * 规则：有 ms/s 后缀按后缀；没有后缀时 |值| >= 100 当毫秒，否则当秒
+ * （老写法 2500 仍然有效，手写 -7.5 也能用 —— 原来整数解析会直接把小数丢掉）。 */
+static gint config_parse_offset_ms(const gchar *raw)
+{
+    g_autofree gchar *text = NULL;
+    gchar            *end;
+    gboolean          seconds;
+    double            value;
+
+    if (raw == NULL || *raw == '\0')
+        return 0;
+
+    text = g_strstrip(g_strdup(raw));
+    value = g_ascii_strtod(text, &end);
+
+    if (end == text)
+        return 0;
+
+    g_strstrip(end);
+
+    if (*end != '\0') {
+        if (g_ascii_strcasecmp(end, "ms") == 0)          seconds = FALSE;
+        else if (g_ascii_strcasecmp(end, "s") == 0 ||
+                 g_ascii_strcasecmp(end, "sec") == 0)    seconds = TRUE;
+        else                                             return 0;
+    } else {
+        seconds = fabs(value) < 100.0;
+    }
+
+    return (gint)llround(seconds ? value * 1000.0 : value);
 }
 
 
@@ -182,7 +218,11 @@ static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
         track->artist     = config_get_string(kf, names[i], "artist");
         track->pic        = config_get_string(kf, names[i], "pic");
         track->lrc        = config_get_string(kf, names[i], "lrc");
-        track->lrc_offset_ms = config_get_int(kf, names[i], "lrc_offset", 0);
+        {
+            g_autofree gchar *offset = config_get_string(kf, names[i], "lrc_offset");
+
+            track->lrc_offset_ms = config_parse_offset_ms(offset);
+        }
         track->page       = config_get_string(kf, names[i], "page");
         track->note       = config_get_string(kf, names[i], "note");
         track->platform    = config_get_string(kf, names[i], "platform");
@@ -350,42 +390,4 @@ void config_free(void)
 
     g_config = (APPconfig){ 0 };
     g_loaded = FALSE;
-}
-
-void config_save_default(const char *path)
-{
-    g_autoptr(GKeyFile) key_file = g_key_file_new();
-    g_autoptr(GError) error = NULL;
-
-    g_key_file_set_integer(key_file, "window", "width", WINDOW_WIDTH);
-    g_key_file_set_integer(key_file, "window", "height", WINDOW_HEIGHT);
-    g_key_file_set_boolean(key_file, "window", "fullscreen", FALSE);
-    g_key_file_set_string(key_file, "window", "title", WINDOW_TITLE);
-
-    g_key_file_set_string(key_file, "qrcode", "link", QRCODE_LINK);
-    g_key_file_set_string(key_file, "qrcode", "label", "");
-
-    g_key_file_set_comment(key_file, "note", NULL,
-                           " 显示在大播放时间上方的一行备注，可留空  ", NULL);
-    g_key_file_set_string(key_file, "note", "text", "");
-
-    g_key_file_set_string(key_file, "playback", "repeat", "all");
-    g_key_file_set_boolean(key_file, "playback", "shuffle", FALSE);
-
-    g_key_file_set_comment(key_file, "audio1", NULL,
-                           " 每个 [audioN] 是一项曲目，按 N 从小到大排序  ", NULL);
-    g_key_file_set_string(key_file, "audio1", "link", "src/assets/bgm.mp3");
-    g_key_file_set_string(key_file, "audio1", "title", "");
-    g_key_file_set_string(key_file, "audio1", "artist", "");
-    g_key_file_set_string(key_file, "audio1", "page", "");
-    g_key_file_set_string(key_file, "audio1", "platform", "");
-    g_key_file_set_string(key_file, "audio1", "pic", "");
-    g_key_file_set_string(key_file, "audio1", "lrc", "");
-
-    g_key_file_set_string(key_file, "audio2", "link", "https://example.com/song.mp3");
-    g_key_file_set_string(key_file, "audio2", "pic", "https://example.com/cover.jpg");
-    g_key_file_set_string(key_file, "audio2", "lrc", "https://example.com/song.lrc");
-
-    if (!g_key_file_save_to_file(key_file, path, &error))
-        g_warning("Failed to save default config: %s", error->message);
 }

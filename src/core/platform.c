@@ -5,9 +5,14 @@
 
 #include "platform.h"
 
-/* 图标来自 Simple Icons（https://simpleicons.org，CC0-1.0 公共领域）：
+/* 图形来自 Simple Icons（https://simpleicons.org，CC0-1.0 公共领域）：
  * 纯 SVG path，运行时用 librsvg 渲染成 surface，再用 alpha 当遮罩涂成白色。
- * 想换图标/加平台，只要往 src/icons/ 里丢一个同名 SVG。 */
+ * 想换图标/加平台，只要往 src/icons/ 里丢一个同名 SVG。
+ *
+ * src/icons/wordmark-<slug>.svg 是各家的官方字标（取自 Wikimedia Commons 上的
+ * 官方 logo 文件）。胶囊里优先贴字标，品牌名不再自己用字体排 —— 没有字标的平台
+ * （网易云音乐、自定义链接）才退回"品牌色图标 + 文字"。这些字标是各自所有者的
+ * 商标，这里只用于标识曲目来源。 */
 
 static const struct {
     const char *id;
@@ -98,14 +103,6 @@ const char *platform_name(Platform p)
         return g_platforms[0].name;
 
     return g_platforms[p].name;
-}
-
-const char *platform_id(Platform p)
-{
-    if ((int)p < 0 || (int)p >= PLATFORM_COUNT)
-        return g_platforms[0].id;
-
-    return g_platforms[p].id;
 }
 
 void platform_brand_color(Platform p, double *r, double *g, double *b)
@@ -199,6 +196,173 @@ static cairo_surface_t *icon_surface(Platform p, int px)
     g_icons[p].px      = px;
 
     return surface;
+}
+
+/* ---------- 官方字标（wordmark） ---------- */
+
+typedef struct {
+    cairo_surface_t *surface;   /* 白色 alpha 遮罩，按 WRD_PX 高度渲染 */
+    double           aspect;    /* 宽 / 高 */
+    gboolean         tried;     /* 已经尝试过加载（失败也记住，不要每次重试） */
+} WordCache;
+
+#define WRD_PX 128          /* 字标缓存的高度（像素），画的时候等比缩 */
+
+static WordCache g_words[PLATFORM_COUNT];
+
+static gchar *wordmark_path(Platform p)
+{
+    g_autofree gchar *name = g_strdup_printf("wordmark-%s.svg", g_platforms[p].slug);
+
+    return g_build_filename("src", "icons", name, NULL);
+}
+
+/* 从 SVG 里读宽高比：先看 width/height，其次看 viewBox（很多官方 SVG 只给 viewBox） */
+static double wordmark_aspect(RsvgHandle *handle)
+{
+    gboolean      has_w = FALSE, has_h = FALSE, has_vb = FALSE;
+    RsvgLength    w = { 0 }, h = { 0 };
+    RsvgRectangle vb = { 0, 0, 0, 0 };
+    double        iw = 0.0, ih = 0.0;
+    double        aspect = 0.0;
+
+    if (rsvg_handle_get_intrinsic_size_in_pixels(handle, &iw, &ih) && iw > 0 && ih > 0)
+        return iw / ih;
+
+    rsvg_handle_get_intrinsic_dimensions(handle, &has_w, &w, &has_h, &h, &has_vb, &vb);
+
+    /* 很多官方 SVG 只给 viewBox（width/height 是 100%），那种按 viewBox 算 */
+    if (has_vb && vb.width > 0 && vb.height > 0)
+        aspect = vb.width / vb.height;
+    else if (has_w && has_h && w.length > 0 && h.length > 0)
+        aspect = w.length / h.length;
+
+    return aspect > 0.0 ? aspect : 0.0;
+}
+
+/* 加载并渲染成白色遮罩（只渲染一次，之后按需缩放） */
+static WordCache *wordmark_cache(Platform p)
+{
+    WordCache         *cache;
+    g_autofree gchar  *path = NULL;
+    g_autoptr(GError)  error = NULL;
+    RsvgHandle        *handle;
+    cairo_surface_t   *surface;
+    RsvgRectangle      viewport;
+    cairo_t           *cr;
+    double             aspect;
+    int                px_w;
+
+    if ((int)p <= 0 || (int)p >= PLATFORM_COUNT)
+        return NULL;
+
+    cache = &g_words[p];
+
+    if (cache->tried)
+        return cache->surface != NULL ? cache : NULL;
+
+    cache->tried = TRUE;
+
+    if (g_platforms[p].slug == NULL)
+        return NULL;
+
+    path = wordmark_path(p);
+
+    if (!g_file_test(path, G_FILE_TEST_EXISTS))
+        return NULL;                       /* 没有字标：调用方退回图标 + 文字 */
+
+    handle = rsvg_handle_new_from_file(path, &error);
+    if (handle == NULL) {
+        g_warning("wordmark: cannot parse %s: %s", path, error->message);
+        return NULL;
+    }
+
+    aspect = wordmark_aspect(handle);
+
+    if (aspect <= 0.0) {
+        g_warning("wordmark: %s has no usable size", path);
+        g_object_unref(handle);
+        return NULL;
+    }
+
+    px_w   = MAX(8, (int)lround((double)WRD_PX * aspect));
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px_w, WRD_PX);
+
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surface);
+        g_object_unref(handle);
+        return NULL;
+    }
+
+    cr = cairo_create(surface);
+    viewport.x      = 0.0;
+    viewport.y      = 0.0;
+    viewport.width  = (double)px_w;
+    viewport.height = (double)WRD_PX;
+
+    if (!rsvg_handle_render_document(handle, cr, &viewport, &error)) {
+        g_warning("wordmark: render failed %s: %s", path, error->message);
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+        g_object_unref(handle);
+        return NULL;
+    }
+
+    cairo_destroy(cr);
+    g_object_unref(handle);
+
+    cache->surface = surface;
+    cache->aspect  = aspect;
+
+    return cache;
+}
+
+gboolean platform_wordmark_size(Platform p, double max_h, double max_w,
+                                double *out_w, double *out_h)
+{
+    WordCache *cache = wordmark_cache(p);
+    double     w, h;
+
+    if (cache == NULL || max_h <= 0.0 || max_w <= 0.0)
+        return FALSE;
+
+    h = max_h;
+    w = h * cache->aspect;
+
+    if (w > max_w) {                 /* 太宽就整体缩小，保持比例 */
+        w = max_w;
+        h = w / cache->aspect;
+    }
+
+    if (out_w != NULL) *out_w = w;
+    if (out_h != NULL) *out_h = h;
+
+    return TRUE;
+}
+
+void platform_draw_wordmark(cairo_t *cr, Platform p, double x, double y,
+                            double w, double h)
+{
+    WordCache       *cache = wordmark_cache(p);
+    cairo_surface_t *surface;
+    double           sw, sh;
+
+    if (cache == NULL || w <= 0.0 || h <= 0.0)
+        return;
+
+    surface = cache->surface;
+    sw      = (double)cairo_image_surface_get_width(surface);
+    sh      = (double)cairo_image_surface_get_height(surface);
+
+    if (sw <= 0.0 || sh <= 0.0)
+        return;
+
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, w / sw, h / sh);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
+    cairo_mask_surface(cr, surface, 0.0, 0.0);
+    cairo_restore(cr);
 }
 
 static void icon_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double radius)

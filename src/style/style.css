@@ -1,47 +1,45 @@
-/* Sowon2 风格：近黑底、零装饰、完全扁平化 */
+/* Sowon2 风格：近黑底、零装饰、完全扁平化。
+ *
+ * 注意：GTK4 的 CSS 不支持 `!important`（写了会被整条丢弃并报警）。
+ * 这里只保留"必须压住主题默认样式"的几条规则 —— 内容本身是 cairo 画的透明画布。
+ */
 
-/* 1. 根窗口与装饰：彻底消除圆角、边框、阴影 */
 window,
 window.csd,
 window.background,
-.window-frame,
 decoration,
 .titlebar {
   background-color: #0a0a0a;
   background-image: none;
   color: #e6e6e8;
-  border: none !important;
-  border-width: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
 }
 
-/* 失焦时同样保持扁平，防止阴影复活 */
 window.csd:backdrop,
 decoration:backdrop,
-.titlebar:backdrop {
+.titlebar:backdrop,
+headerbar:backdrop {
   background-color: #0a0a0a;
-  box-shadow: none !important;
-  border: none !important;
+  box-shadow: none;
+  border: none;
 }
 
-/* 2. 标题栏：最小化视觉存在 */
+/* 标题栏：最小化视觉存在，只当一条很淡的分隔线 */
 headerbar {
   background-color: #0a0a0a;
   background-image: none;
-  color: rgba(230, 230, 232, 0.40);
   border: none;
-  /* 将底部分隔线降到几乎不可见 */
   border-bottom: 1px solid rgba(230, 230, 232, 0.02);
   min-height: 0;
   padding: 0 4px;
   margin: 0;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
-/* 标题文字：等宽、低透明度、失焦更淡 */
 headerbar label,
 headerbar .title {
   color: rgba(230, 230, 232, 0.25);
@@ -56,10 +54,8 @@ headerbar:backdrop .title {
   color: rgba(230, 230, 232, 0.12);
 }
 
-/* 3. 窗口控制按钮：更小、更淡、无背景块 */
-headerbar windowcontrols button.minimize,
-headerbar windowcontrols button.maximize,
-headerbar windowcontrols button.close {
+/* 窗口控制按钮：更小、更淡、无背景块 */
+headerbar windowcontrols button {
   background-color: transparent;
   background-image: none;
   border: none;
@@ -78,7 +74,6 @@ headerbar windowcontrols button > image {
   margin: 0;
 }
 
-/* 悬停效果：只轻微提亮图标，几乎不显示背景 */
 headerbar windowcontrols button:hover {
   background-color: rgba(230, 230, 232, 0.04);
   color: #e6e6e8;
@@ -93,10 +88,9 @@ headerbar windowcontrols button:active {
   color: #ffffff;
 }
 
-/* 4. 内容层透明：让 Cairo 绘制的内容完全透出 */
-.layer,
-.band,
-.canvas {
+/* 内容层透明：让 cairo 画的内容和底下的背景图完全透出来 */
+.canvas,
+.bg-picture {
   background-color: transparent;
   background-image: none;
 }

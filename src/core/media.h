@@ -79,6 +79,14 @@ int  media_is_paused(Media *m);
 int  media_is_loading(Media *m);
 int  media_is_finished(Media *m);
 
+/* 消费掉"放完了"标志：换歌是异步的（网络曲目要等解析），
+ * 不消费的话下一次 tick 还会看到同一个 finished，导致连跳两首。 */
+void media_ack_finished(Media *m);
+
+/* 切歌时调用：清掉上一首的错误提示 + 消费掉 finished。
+ * （媒体真正开始加载要等网络解析回来，那之前界面不该挂着上一首的错误） */
+void media_begin_track(Media *m);
+
 /* 最近一次加载失败的原因；没有错误返回 NULL */
 const char *media_error(Media *m);
 

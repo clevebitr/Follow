@@ -22,10 +22,17 @@ Platform    platform_from_url(const char *url);
 Platform    platform_from_name(const char *name);
 
 const char *platform_name(Platform p);        /* 显示用，全大写 */
-const char *platform_id(Platform p);          /* 配置里用的短名 */
 void        platform_brand_color(Platform p, double *r, double *g, double *b);
 
 /* 在 (x, y, size, size) 的方块里画品牌色底 + 白色符号 */
 void        platform_draw_icon(cairo_t *cr, Platform p, double x, double y, double size);
+
+/* 官方字标（wordmark）：有就按 max_h / max_w 等比缩放，返回实际尺寸。
+ * 品牌名不再自己排字，胶囊里直接贴官方 logo —— 没有字标的平台返回 FALSE，
+ * 调用方自己退回"图标 + 文字"。 */
+gboolean    platform_wordmark_size(Platform p, double max_h, double max_w,
+                                   double *out_w, double *out_h);
+void        platform_draw_wordmark(cairo_t *cr, Platform p, double x, double y,
+                                   double w, double h);
 
 #endif /* FOLLOW_PLATFORM_H */
