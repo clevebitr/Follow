@@ -152,8 +152,7 @@ static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
     }
 
     if (n_names > 1)
-        g_qsort_with_data(names, (gint)n_names, sizeof(gchar *),
-                          compare_track_groups, NULL);
+        g_sort_array(names, n_names, sizeof(gchar *), compare_track_groups, NULL);
 
     cfg->tracks = g_new0(AudioTrack, n_names);
 

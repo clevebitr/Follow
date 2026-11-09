@@ -1,6 +1,63 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include <stdio.h>
+#include <stdlib.h>
 #include "media.h"
+
+#if defined(_WIN32)
+#include <windows.h>
+
+/* miniaudio 的 char * 路径在 Windows 上走 CreateFileA（ANSI/GBK），UTF-8 的中文名会直接失败，
+ * 所以统一转成 UTF-16 再交给 _w 接口。 */
+static wchar_t *media_path_utf8_to_wide(const char *path)
+{
+    wchar_t *wide;
+    UINT     cp = CP_UTF8;
+    DWORD    flags = MB_ERR_INVALID_CHARS;
+    int      len;
+
+    if (path == NULL || *path == '\0')
+        return NULL;
+
+    len = MultiByteToWideChar(cp, flags, path, -1, NULL, 0);
+    if (len <= 0) {
+        cp    = CP_ACP;
+        flags = 0;
+        len   = MultiByteToWideChar(cp, flags, path, -1, NULL, 0);
+        if (len <= 0)
+            return NULL;
+    }
+
+    wide = (wchar_t *)malloc((size_t)len * sizeof(wchar_t));
+    if (wide == NULL)
+        return NULL;
+
+    if (MultiByteToWideChar(cp, flags, path, -1, wide, len) <= 0) {
+        free(wide);
+        return NULL;
+    }
+
+    return wide;
+}
+#endif /* _WIN32 */
+
+/* 用 UTF-8 路径加载一首曲目：Windows 走 _w 接口，其它平台走普通接口 */
+static ma_result media_sound_init_from_file(Media *m, const char *path)
+{
+#if defined(_WIN32)
+    wchar_t  *wide = media_path_utf8_to_wide(path);
+    ma_result result;
+
+    if (wide != NULL) {
+        result = ma_sound_init_from_file_w(&m->engine, wide, MA_SOUND_FLAG_STREAM,
+                                          NULL, NULL, &m->sound);
+        free(wide);
+        return result;
+    }
+#endif
+
+    return ma_sound_init_from_file(&m->engine, path, MA_SOUND_FLAG_STREAM,
+                                   NULL, NULL, &m->sound);
+}
 
 static void media_unload(Media *m)
 {
@@ -38,10 +95,10 @@ int media_play(Media *m, const char *path)
 
     media_unload(m);
 
-    result = ma_sound_init_from_file(&m->engine, path, MA_SOUND_FLAG_STREAM,
-                                     NULL, NULL, &m->sound);
+    result = media_sound_init_from_file(m, path);
     if (result != MA_SUCCESS) {
-        printf("media: load '%s' failed: %s\n", path, ma_result_description(result));
+        fprintf(stderr, "media: load '%s' failed: %s (%d)\n",
+                path, ma_result_description(result), (int)result);
         return -2;
     }
     m->has_sound = 1;

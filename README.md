@@ -8,6 +8,8 @@ A tiny GTK4 desktop media player: cover art + QR code + playback controls, confi
 
 - GTK4 UI (header bar, custom CSS theme, flat dark style)
 - Local audio playback through [miniaudio](https://miniaud.io/) — play / pause / resume / stop / seek
+- Cover art from the config `pic` key (local files today, remote URLs pending), shown right of the QR code
+- Progress bar overlaid on the cover, sitting on a faint tint of the theme accent color
 - Draggable progress bar with a custom, handle-less scale style ([`src/style/style.css`](src/style/style.css))
 - QR code rendered from a configurable link ([libqrencode](https://fukuchi.org/works/qrencode/) → `GdkTexture`)
 - INI based config: window geometry, QR code link, and an arbitrary number of `[audioN]` playlist entries
@@ -52,14 +54,20 @@ make          # produces ./main.exe
 ```
 src/style/style.css    UI theme
 src/config.ini         configuration (created by hand, see below)
-src/assets/bgm.mp3     fallback audio file
+src/assets/*           whatever the config points at (audio, cover)
 ```
 
-Debug logs (parsed playlist, skipped remote tracks…):
+Logs on startup (parsed playlist, then one line per play / skip / failure):
 
-```sh
-G_MESSAGES_DEBUG=all ./main.exe
 ```
+** Message: config: loading src/config.ini (cwd = F:\...)
+** Message: config: 1 track(s), window 800x600
+** Message: track[0] audio1  link=src/assets/耳朵-李荣浩.mp3  pic=src/assets/耳朵.jpg  lrc=-
+** Message: play: track[0] audio1 -> src/assets/耳朵-李荣浩.mp3
+```
+
+These go through `g_message`, so they show up without extra env vars. Add
+`G_MESSAGES_DEBUG=all ./main.exe` for the finer (DEBUG level) output.
 
 `make clean` removes the binary.
 
@@ -79,7 +87,7 @@ link=https://github.com/clevebitr
 
 # one track per [audioN] section, ordered by N (audio2 < audio10)
 [audio1]
-link=src/assets/bgm.mp3      # audio file: local path or http(s) URL
+link=src/assets/耳朵-李荣浩.mp3   # audio file: local path or http(s) URL, UTF-8
 #pic=F:/pics/cover.jpg       # cover art: local path or URL
 #lrc=F:/lyrics/bgm.lrc       # lyrics: local path or URL
 
@@ -101,23 +109,32 @@ lrc=https://example.com/song.lrc
 
 Everything falls back to a built-in default, so a missing or broken `src/config.ini` still starts the app.
 
+Playback strictly follows the playlist: the play button walks `[audio1]`, `[audio2]` … and plays the first
+usable entry; when none is usable it logs the reason per track (`not found` / `remote not implemented yet` /
+miniaudio's error) instead of silently picking something else. There is no hidden fallback track.
+
+Paths are read as UTF-8, so non-ASCII names such as `src/assets/耳朵-李荣浩.mp3` work. On Windows miniaudio's
+narrow `char *` API interprets paths with the ANSI code page, so [`src/core/media.c`](src/core/media.c)
+converts to UTF-16 and calls the `_w` variants (`ma_sound_init_from_file_w`).
+
 ## Project layout
 
 ```
-src/core/main.c      GTK application, UI wiring, playback controls, tick timer
+src/core/main.c      GTK application, UI wiring (QR + cover + overlay controls), tick timer
 src/core/config.c/.h INI parsing → APPconfig / AudioTrack playlist
 src/core/media.c/.h  miniaudio wrapper (play, pause, stop, seek, position, duration)
 src/core/qrcode.c/.h libqrencode → GdkTexture
 src/core/http.c/.h   libcurl synchronous GET (not used by the UI yet)
-src/style/style.css  theme: window, header bar, window controls, scale
+src/style/style.css  theme: window, header bar, controls, scale, cover frame
 src/models/          vendored miniaudio.h
-src/assets/          bundled audio
+src/assets/          bundled audio + placeholder cover
 ```
 
 ## Roadmap
 
 - [ ] Remote audio: download with libcurl, then feed miniaudio
-- [ ] Cover art: local file + remote URL → `GdkTexture`
+- [x] Cover art: local file → `GdkTexture`
+- [ ] Cover art from a remote URL
 - [ ] LRC lyrics: parse `[mm:ss.xx]` timestamps, highlight the current line
 - [ ] Track switching UI (prev / next / play list)
 - [ ] Persist window geometry back into `config.ini` on exit (`config_save_default` is only a template writer today)

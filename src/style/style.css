@@ -184,3 +184,42 @@ scale:disabled > trough {
 scale:disabled > trough > highlight {
   background-color: #6b7089;
 }
+/* ============ 封面：淡色衬底 + 叠在封面上的进度条 ============ */
+
+/* 图片等比缩放后多出来的地方会露出这层“当前配色”的淡淡衬底 */
+.cover-frame {
+  padding: 8px;
+  border-radius: 10px;
+  background-color: rgba(140, 170, 238, 0.10);   /* accent @ 10% */
+  background-image: none;
+}
+
+/* 贴在封面底部的一条玻璃感进度栏，压住封面保证时间文字可读 */
+.cover-progress {
+  margin: 10px;
+  padding: 2px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(140, 170, 238, 0.18);
+  background-color: rgba(48, 52, 70, 0.72);      /* base @ 72% */
+  background-image: none;
+}
+
+.cover-progress label {
+  color: #c6d0f5;
+}
+
+/* 封面上的这层进度条要压在图片上，轨道给亮一点的半透明色才看得见 */
+.cover-progress scale > trough {
+  min-height: 6px;
+  border-radius: 3px;
+  background-color: rgba(198, 208, 245, 0.24);
+}
+
+.cover-progress scale:disabled > trough {
+  background-color: rgba(198, 208, 245, 0.14);
+}
+
+.cover-progress scale > trough > highlight {
+  border-radius: 3px;
+  background-color: #8caaee;
+}
