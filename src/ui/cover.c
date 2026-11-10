@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "cover.h"
 
 #include <math.h>
@@ -11,10 +18,8 @@
 #include "texture.h"
 #include "ui.h"
 
-/* 原图长边上限：比任何显示尺寸都大，又不会让 cairo 每帧去缩几千像素 */
+/* 原图长边上限 */
 #define COVER_MAX_DIM 768
-
-/* ---------- 网络封面 ---------- */
 
 typedef struct {
     guint   gen;
@@ -24,8 +29,7 @@ typedef struct {
     gchar  *error;
 } CoverJob;
 
-/* B 站图床的 @... 后缀改成正方形 JPEG；其它地址的 .avif 换 .jpg
- * —— 这套 GDK 没有 AVIF 解码器，直接吃会失败。 */
+/* 图床的 @... 后缀改成正方形 JPEG；其它地址的 .avif 换 .jpg */
 static gchar *cover_url_normalize(const char *url)
 {
     if (url == NULL)
@@ -50,8 +54,7 @@ static gchar *cover_url_normalize(const char *url)
     return g_strdup(url);
 }
 
-/* 把 gdk-pixbuf 装成当前封面：取种子色 + 降到 768px 的 cairo surface。
- * gdk-pixbuf 的像素是非预乘、通道序 R,G,B[,A]，比 gdk_texture_download 可靠得多。 */
+/* 把 gdk-pixbuf 装成当前封面：取种子色 + 降到 768px 的 cairo surface。 */
 static void install_pixbuf(GdkPixbuf *pixbuf)
 {
     const int     w      = gdk_pixbuf_get_width(pixbuf);
@@ -103,7 +106,6 @@ static gboolean cover_done(gpointer data)
                 install_pixbuf(pixbuf);
                 g_object_unref(pixbuf);
 
-                /* 顺手落盘，下次直接读 */
                 if (job->cache_path != NULL) {
                     gsize           size = 0;
                     gconstpointer   data = g_bytes_get_data(job->bytes, &size);
@@ -176,7 +178,6 @@ static void cover_set_remote(const AudioTrack *track)
     }
 }
 
-/* ---------- 对外接口 ---------- */
 
 void cover_clear(void)
 {
@@ -191,11 +192,11 @@ void cover_set(const AudioTrack *track)
     GdkPixbuf        *pixbuf;
     gchar            *path;
 
-    /* 先把上一张背景留作退场（要趁 palette 还没被重置），再换封面 */
+    /* 先把上一张背景留作退场再换封面 */
     backdrop_swap();
 
     cover_clear();
-    app.cover_gen++;          /* 作废还在下载的旧封面 */
+    app.cover_gen++;                /* 作废还在下载的旧封面 */
     palette_reset(&app.palette);
     ui_request_redraw();
 
@@ -227,7 +228,7 @@ cairo_surface_t *cover_base(void)
     return app.cover;
 }
 
-/* 按显示尺寸缩一份并缓存（每帧从 768px 缩到 300px 会让 cairo 慢上百倍） */
+/* 按显示尺寸缩一份并缓存 */
 static cairo_surface_t *cover_scaled_for(double size)
 {
     const double sw = (double)cairo_image_surface_get_width(app.cover);

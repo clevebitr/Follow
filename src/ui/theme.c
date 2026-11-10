@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include <math.h>
 
 #include "theme.h"
@@ -177,7 +184,6 @@ void card_draw(cairo_t *cr, double x, double y, double w, double h, double radiu
     path_round_rect(cr, x, y, w, h, radius);
     cairo_fill_preserve(cr);
 
-    /* 一圈极淡的亮边，让衬底和背景分得开 */
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.05);
     cairo_set_line_width(cr, 1.0);
     cairo_stroke(cr);

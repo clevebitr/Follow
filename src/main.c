@@ -1,3 +1,23 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
+/* 
+ * 分工：
+ *   main.c     生命周期、键盘、定时器
+ *   player.c   播放控制、网络解析、曲目信息
+ *   lyricview  歌词加载、在线源、偏移、当前行
+ *   cover.c    封面加载（本地 / 网络缓存）与绘制
+ *   backdrop   动态背景（模糊封面 + 漂移的种子色）
+ *   qrcard     二维码槽、平台胶囊
+ *   layout     一次绘制用到的所有几何量
+ *   stage      主画面（大时钟 / 备注 / 歌词 / 右列 / 统计）
+ *   help       F1 快捷键页
+ */
+
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -17,13 +37,6 @@
 #include "stats.h"
 #include "ui.h"
 
-/* Follow —— 一个 GTK4 音乐播放器，版面复刻 Sowon2（tsoding 的 Jai + raylib
- * "starting soon" 播放器）：近黑舞台、左上巨大手写时钟、时钟下面一行副标题，
- * 右列是封面 / ♪ 曲名 ♪ / 二维码 + 平台徽标，纯键盘操作。
- *
- * 这个文件只做三件事：建窗口、收键盘、跑 100ms 定时器。其余都在 src/ui/。
- */
-
 #define CSS_PATH    "src/style/style.css"
 #define CONFIG_PATH "src/config.ini"
 #define TICK_MS     100
@@ -33,8 +46,7 @@ App app;
 static gboolean on_tick(gpointer data);
 static gboolean on_anim_tick(gpointer data);
 
-/* ---------- 定时器：100ms 一次，只有"看得见的变化"才真的重画 ---------- */
-
+/* clock 100ms */
 static void track_listening_time(gboolean playing)
 {
     gint64 now_us;
@@ -49,11 +61,9 @@ static void track_listening_time(gboolean playing)
     if (app.stats_last_us > 0) {
         double dt = (double)(now_us - app.stats_last_us) / 1000000.0;
 
-        /* 异常大跳变（睡眠 / 卡顿）直接丢掉 */
         if (dt > 0.0 && dt < 5.0)
             app.stats_fraction += dt;
 
-        /* stats 是按秒存的，所以零头先攒着，够 1 秒再记 */
         if (app.stats_fraction >= 1.0) {
             guint whole = (guint)app.stats_fraction;
 
@@ -70,7 +80,6 @@ static void track_listening_time(gboolean playing)
     }
 }
 
-/* 过渡期间才存在的 16ms 画布帧循环：跑完自己停掉 */
 static gboolean on_anim_tick(gpointer data)
 {
     gboolean busy;
@@ -134,7 +143,6 @@ static gboolean on_tick(gpointer data)
         ui_request_redraw();
     }
 
-    /* 墙钟每秒都要走：暂停时播放位置不变，但左下角的时钟不能停 */
     {
         gint64 wall_second = g_get_real_time() / G_USEC_PER_SEC;
 
@@ -154,8 +162,7 @@ static gboolean on_tick(gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
-/* ---------- 键盘：全部操作都在这里 ---------- */
-
+/* keyboard */
 static void toggle_fullscreen(void)
 {
     GtkWindow *window = GTK_WINDOW(app.window);
@@ -184,7 +191,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
             gtk_window_close(GTK_WINDOW(app.window));
         }
 
-        return TRUE;      /* 帮助页吞掉其余按键 */
+        return TRUE;
     }
 
     switch (keyval) {
@@ -209,13 +216,13 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     case GDK_KEY_s: case GDK_KEY_S:
         player_stop();
         return TRUE;
-    case GDK_KEY_bracketleft:            /* 歌词提前 250ms */
+    case GDK_KEY_bracketleft:            /* +250ms */
         lyricview_shift_offset(-250);
         return TRUE;
-    case GDK_KEY_bracketright:           /* 歌词延后 250ms */
+    case GDK_KEY_bracketright:           /* -250ms */
         lyricview_shift_offset(+250);
         return TRUE;
-    case GDK_KEY_backslash:              /* 恢复 ini 里的值 */
+    case GDK_KEY_backslash:              /* reset config */
         lyricview_reset_offset();
         return TRUE;
     case GDK_KEY_l: case GDK_KEY_L:
@@ -243,7 +250,6 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     }
 }
 
-/* ---------- 建窗口 ---------- */
 
 static void activate(GtkApplication *app_, gpointer user_data)
 {
@@ -267,7 +273,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     if (cfg->fullscreen)
         gtk_window_fullscreen(GTK_WINDOW(window));
 
-    /* 底：动态背景（小纹理，GPU 放大） */
+    /* background */
     app.bg_picture = gtk_picture_new();
     gtk_picture_set_content_fit(GTK_PICTURE(app.bg_picture), GTK_CONTENT_FIT_FILL);
     gtk_picture_set_can_shrink(GTK_PICTURE(app.bg_picture), TRUE);
@@ -275,7 +281,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_widget_set_vexpand(app.bg_picture, TRUE);
     gtk_widget_add_css_class(app.bg_picture, "bg-picture");
 
-    /* 上：文字 / 封面 / 二维码（透明画布） */
+    /* pic */
     app.canvas = gtk_drawing_area_new();
     gtk_widget_set_hexpand(app.canvas, TRUE);
     gtk_widget_set_vexpand(app.canvas, TRUE);
@@ -308,8 +314,6 @@ static void activate(GtkApplication *app_, gpointer user_data)
     backdrop_push(cfg->width, cfg->height);
     app.bg_tick_id = g_timeout_add(33, backdrop_tick, NULL);
 }
-
-/* ---------- 生命周期 ---------- */
 
 static void startup(GtkApplication *app_, gpointer user_data)
 {

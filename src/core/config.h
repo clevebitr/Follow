@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_CONFIG_H
 #define FOLLOW_CONFIG_H
 
@@ -12,17 +19,18 @@
  * link / pic / lrc 既可以是本地路径，也可以是 http(s) URL；
  * *_remote 是加载时算好的标志，省得每次再解析 scheme。
  * 所有字段的内存都由 config 模块持有，调用方不要 free。 */
+
 typedef struct {
-    gchar   *id;          /* 组名，如 "audio1" */
-    gchar   *link;        /* 音频：本地路径 或 http(s) URL，必有 */
-    gchar   *title;       /* 曲名：可为 NULL（从文件名推断） */
-    gchar   *artist;      /* 艺人：可为 NULL */
-    gchar   *pic;         /* 封面：可为 NULL */
-    gchar   *lrc;         /* 歌词：本地 .lrc / netease:... / qq:...，可为 NULL */
+    gchar   *id;            /* 组名，如 "audio1" */
+    gchar   *link;          /* 音频：本地路径 或 http(s) URL，必有 */
+    gchar   *title;         /* 曲名：可为 NULL（从文件名推断） */
+    gchar   *artist;        /* 艺人：可为 NULL */
+    gchar   *pic;           /* 封面：可为 NULL */
+    gchar   *lrc;           /* 歌词：本地 .lrc / netease:... / qq:...，可为 NULL */
     gint     lrc_offset_ms; /* 歌词整体偏移（毫秒）：正数 = 歌词延后 */
-    gchar   *page;        /* 平台页面链接（二维码 + 徽标用）：可为 NULL */
-    gchar   *note;        /* 这首歌的备注（覆盖 [note] text），可为 NULL */
-    gchar   *platform;    /* 平台短名，可为 NULL（缺省按 page 的域名自动识别） */
+    gchar   *page;          /* 平台页面链接（二维码 + 徽标用）：可为 NULL */
+    gchar   *note;          /* 这首歌的备注（覆盖 [note] text），可为 NULL */
+    gchar   *platform;      /* 平台短名，可为 NULL（缺省按 page 的域名自动识别） */
     gboolean link_remote;
     gboolean pic_remote;
     gboolean lrc_remote;

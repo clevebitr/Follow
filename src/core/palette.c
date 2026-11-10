@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include <math.h>
 #include <string.h>
 

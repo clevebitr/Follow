@@ -1,8 +1,9 @@
-/* Sowon2 风格：近黑底、零装饰、完全扁平化。
- *
- * 注意：GTK4 的 CSS 不支持 `!important`（写了会被整条丢弃并报警）。
- * 这里只保留"必须压住主题默认样式"的几条规则 —— 内容本身是 cairo 画的透明画布。
- */
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
 
 window,
 window.csd,
@@ -28,7 +29,7 @@ headerbar:backdrop {
   border: none;
 }
 
-/* 标题栏：最小化视觉存在，只当一条很淡的分隔线 */
+/* 标题栏：*/
 headerbar {
   background-color: #0a0a0a;
   background-image: none;
@@ -54,7 +55,7 @@ headerbar:backdrop .title {
   color: rgba(230, 230, 232, 0.12);
 }
 
-/* 窗口控制按钮：更小、更淡、无背景块 */
+/* 窗口控制按钮： */
 headerbar windowcontrols button {
   background-color: transparent;
   background-image: none;
@@ -88,7 +89,7 @@ headerbar windowcontrols button:active {
   color: #ffffff;
 }
 
-/* 内容层透明：让 cairo 画的内容和底下的背景图完全透出来 */
+/* 内容层透明： */
 .canvas,
 .bg-picture {
   background-color: transparent;

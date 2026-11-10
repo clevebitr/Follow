@@ -1,10 +1,16 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_PALETTE_H
 #define FOLLOW_PALETTE_H
 
 #include <glib.h>
 
-/* 从封面里取几个"种子色"，用来生成动态背景。
- * 思路和 Android Palette / color-thief / Apple Music 那套一样：
+/* 从封面里取几个种子色，用来生成动态背景。
  * 按 饱和度×明度 加权统计色相直方图，取最重的一簇当主色，再取一个拉开色相的第二色。
  * 灰度封面取不到色时 has = FALSE，背景就只用模糊封面 + 压暗。 */
 

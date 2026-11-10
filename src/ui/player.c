@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "player.h"
 
 #include <gtk/gtk.h>
@@ -10,7 +17,7 @@
 #include "theme.h"
 #include "ui.h"
 
-/* ---------- 网络地址解析（后台线程，绝不阻塞 UI） ---------- */
+/* 网络地址解析（后台线程） */
 
 typedef struct {
     guint       gen;
@@ -74,10 +81,9 @@ static gpointer resolve_thread(gpointer data)
     return NULL;
 }
 
-/* ---------- 曲目信息 ---------- */
+/* 曲目信息 */
 
-/* 优先级：ini 里的 title/artist > 网络解析出来的 > 文件名。
- * 这样 B 站的视频标题不会盖掉你手写的曲名。
+/* 优先级：ini 里的 title/artist > 网络解析 > 文件名。
  * 还没开始播放时（app.track < 0）先显示列表里第一首的资料。 */
 gchar *player_label(void)
 {
@@ -119,7 +125,7 @@ void player_update_window_title(void)
     gtk_window_set_title(GTK_WINDOW(app.window), title != NULL ? title : "Follow");
 }
 
-/* ---------- 切歌 ---------- */
+/* 切歌 */
 
 static void history_push(gint index)
 {
@@ -136,11 +142,10 @@ gboolean player_play_index(gint index)
     if (index < 0 || track == NULL)
         return FALSE;
 
-    /* 先把"现在的画面"拍下来：切歌后它整块往左退场（撤桌重上） */
+    /* 先把现在的画面拍下来：切歌后它整块往左退场 */
     stage_snapshot();
 
-    /* 每次切歌都作废还在路上的解析请求：否则前一首的解析晚到，
-     * 会把它的 URL 塞进媒体线程（放的是 A，界面显示 B） */
+    /* 每次切歌都作废还在路上的解析请求 */
     media_begin_track(&app.media);
 
     app.track        = index;
@@ -215,7 +220,7 @@ void player_play_neighbour(gint dir)
         return;
     }
 
-    /* 随机模式：下一首随机；上一首优先走历史 */
+    /* 随机模式 */
     if (app.shuffle) {
         if (dir < 0 && app.history_len > 1) {
             app.history_len--;                 /* 栈顶是当前曲目，先弹掉 */
@@ -264,7 +269,7 @@ gboolean player_play_first(void)
     return FALSE;
 }
 
-/* ---------- 传输控制 ---------- */
+/* 传输控制 */
 
 void player_toggle(void)
 {
@@ -336,8 +341,7 @@ void player_check_finished(void)
     if (!media_is_finished(&app.media))
         return;
 
-    /* 先把这个事件消费掉：下一首要走解析/下载，期间 state 还是上一首的，
-     * 不消费就会在同一个 finished 上再跳一首（放的是 A，界面显示 B）。 */
+    /* 先把这个事件消费掉：下一首要走解析/下载，期间 state 还是上一首的 */
     media_ack_finished(&app.media);
 
     if (app.repeat == REPEAT_ONE) {

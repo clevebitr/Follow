@@ -1,9 +1,16 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef MEDIA_H
 #define MEDIA_H
 
 #include "miniaudio.h"
 
-/* 播放层 = miniaudio 输出设备 + ffmpeg 解码（本地文件和网络流走同一条路）。
+/* 播放层：miniaudio 输出设备 + ffmpeg 解码。
  *
  * 线程模型：
  *   解码线程  —— ffmpeg 打开/读取/解码/重采样，把 f32 立体声推进环形缓冲。
@@ -79,7 +86,7 @@ int  media_is_paused(Media *m);
 int  media_is_loading(Media *m);
 int  media_is_finished(Media *m);
 
-/* 消费掉"放完了"标志：换歌是异步的（网络曲目要等解析），
+/* 消费掉标志：换歌是异步的（网络曲目要等解析），
  * 不消费的话下一次 tick 还会看到同一个 finished，导致连跳两首。 */
 void media_ack_finished(Media *m);
 

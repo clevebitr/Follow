@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "qrcard.h"
 
 #include <math.h>
@@ -9,18 +16,17 @@
 #include "theme.h"
 #include "ui.h"
 
-/* 二维码的底色：和窗口一样近黑，码点接近纯白 */
+/* 二维码的底色 */
 #define QR_BG_R 0.039
 #define QR_BG_G 0.039
 #define QR_BG_B 0.039
 #define QR_INK_ALPHA 0.95
 
-/* ---------- 槽的增删 ---------- */
+/* 槽的增删 */
 
 static void qr_slot_clear(QrSlot *slot)
 {
-    /* free 完必须置 NULL —— qr_slot_set() 也会先 clear 一次，
-     * 否则会第二次 free 同一个指针（切歌时 double free 直接崩） */
+    /* free 完必须置 NULL —— qr_slot_set() 也会先 clear 一次 */
     g_clear_pointer(&slot->text, g_free);
     g_clear_pointer(&slot->label, g_free);
 
@@ -36,7 +42,7 @@ static void qr_slot_clear(QrSlot *slot)
     slot->with_icon = FALSE;
 }
 
-/* "https://www.github.com/clevebitr/" → "github.com/clevebitr" */
+/* "https://www.github.com/xxx/" → "github.com/xxx" */
 static gchar *short_url(const char *url)
 {
     const char *p = url;
@@ -60,7 +66,7 @@ static gchar *short_url(const char *url)
     return out;
 }
 
-/* "https://www.github.com/x/y" → "github.com"（胶囊上只显示主机名，短且好认） */
+/* "https://www.github.com/x/y" → "github.com" */
 static gchar *url_host(const char *url)
 {
     const char *p = url;
@@ -99,10 +105,9 @@ static void qr_slot_set(QrSlot *slot, const char *text, const char *label,
         g_warning("qrcode: cannot encode %s", text);
 }
 
-/* ---------- 渲染 ---------- */
+/* 渲染 */
 
-/* 预渲染成边长为 size 的正方形：模块大小是分数，但每条边都对到像素，
- * 所以不同版本（模块数不同）的二维码画出来尺寸完全一致。 */
+/* 预渲染成边长为 size 的正方形. 模块大小是分数，但每条边都对到像素 */
 static cairo_surface_t *qr_slot_surface(QrSlot *slot, double size)
 {
     int      n, side;
@@ -160,11 +165,11 @@ static cairo_surface_t *qr_slot_surface(QrSlot *slot, double size)
     return slot->surface;
 }
 
-/* 胶囊：高度固定 = h（不再跟着内容缩放，两个并排时也一模一样高）。
+/* 胶囊：高度固定 = h
  *
- *   有官方字标 → 胶囊里直接贴 logo（品牌名不再自己排字）
+ *   有官方字标 → 胶囊里直接贴 logo
  *   没有字标   → 退回"品牌色图标 + 文字"，文字垂直水平居中
- *   没有平台   → 只显示文字（自定义链接那种） */
+ *   没有平台   → 只显示文字 */
 static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
                          gboolean with_icon, double cx, double y, double h, double max_w)
 {
@@ -184,7 +189,7 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
 
     pad = h * PAD_RATIO;
 
-    /* 1) 官方字标优先 */
+    /* 官方字标优先 */
     if (with_icon && platform != PLATFORM_UNKNOWN) {
         has_wordmark = platform_wordmark_size(platform, h * LOGO_RATIO,
                                               max_w - pad * 2.0, &logo_w, &logo_h);
@@ -192,7 +197,7 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
             content_w = logo_w;
     }
 
-    /* 2) 没有字标：图标 + 文字 */
+    /* 没有字标：图标 + 文字 */
     if (!has_wordmark) {
         if (text == NULL || *text == '\0')
             return;
@@ -274,7 +279,7 @@ static void draw_cell(cairo_t *cr, QrSlot *slot, const Layout *L, double cx)
                  cx, L->badge_y, L->badge_h, L->badge_w);
 }
 
-/* ---------- 对外接口 ---------- */
+/* 对外接口  */
 
 void qrcard_update(const AudioTrack *track)
 {

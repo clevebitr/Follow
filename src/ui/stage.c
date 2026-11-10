@@ -33,8 +33,7 @@ static void format_span(guint seconds, gchar *buf, gsize len)
         g_snprintf(buf, len, "%um", mins);
 }
 
-/* 歌词那一行显示什么（按优先级）：
- * 播放错误 > 歌词请求中 > 歌词错误 > 加载中 > 当前歌词行 */
+/* 播放错误 > 歌词请求中 > 歌词错误 > 加载中 > 当前歌词行 */
 static const gchar *subtitle_line(Rgba *color)
 {
     const gchar *error = media_error(&app.media);
@@ -67,7 +66,6 @@ static const gchar *subtitle_line(Rgba *color)
     return NULL;
 }
 
-/* 当前曲目的备注（时钟上方那一行） */
 static const gchar *current_note(void)
 {
     const APPconfig  *cfg   = config_get();
@@ -76,7 +74,6 @@ static const gchar *current_note(void)
     return config_track_note(cfg, track);
 }
 
-/* ---------- 左下角：12 周热力图 ---------- */
 
 static void draw_heatmap(cairo_t *cr, const Layout *L, double x, double y)
 {
@@ -88,7 +85,7 @@ static void draw_heatmap(cairo_t *cr, const Layout *L, double x, double y)
         : RGBA(0.60, 0.70, 0.95, 1.0);
     const double  step = L->heat_cell + L->heat_gap;
 
-    /* 12 列 = 最近 12 周，列 11 是本周；周一在最上面，未来的格子不画 */
+    /* 最近 12 周，列 11 是本周*/
     for (int col = 0; col < 12; col++) {
         for (int row = 0; row < 7; row++) {
             int    days_ago = today_wd + (11 - col) * 7 - row;
@@ -116,58 +113,36 @@ static void draw_heatmap(cairo_t *cr, const Layout *L, double x, double y)
     }
 }
 
-/* 墙钟 + 收听时长 + 热力图，整块装在一张深色衬底上 */
-static void draw_stats(cairo_t *cr, const Layout *L, double width, double height)
+/* "LISTENED 3h 20m  ·  TODAY 12m" */
+static gchar *stats_summary(void)
 {
-    g_autoptr(GDateTime) now  = g_date_time_new_now_local();
-    g_autofree gchar    *wall = g_date_time_format(now, "%H:%M:%S");
-    g_autofree gchar    *line = NULL;
-    gchar                total[32];
-    gchar                today[32];
-    const double         pad     = L->stats_card_pad;
-    const double         step    = L->heat_cell + L->heat_gap;
-    const double         heat_w  = 12.0 * step - L->heat_gap;
-    const double         block_h = L->stats_clock_px * 1.30 + height * 0.008
-                                 + L->stats_px * 1.60 + height * 0.010
-                                 + L->heat_h;
-    TextStyle            wall_style, line_style;
-    double               content_w, x, y;
+    gchar total[32];
+    gchar today[32];
 
     format_span(stats_total_seconds(&app.stats), total, sizeof(total));
     format_span(stats_seconds_today(&app.stats), today, sizeof(today));
-    line = g_strdup_printf("LISTENED %s  ·  TODAY %s", total, today);
 
-    wall_style = TEXT_STYLE(FONT_HAND, L->stats_clock_px, PANGO_WEIGHT_NORMAL, 0.0, WHITE(0.78));
-    line_style = TEXT_STYLE(FONT_MONO, L->stats_px, PANGO_WEIGHT_NORMAL,
-                            L->stats_px * 0.14, col_dim);
-
-    content_w = MAX(heat_w, MAX(text_width(cr, wall, &wall_style),
-                                text_width(cr, line, &line_style)));
-
-    /* 衬底比内容宽一圈：总宽 ≈ 内容 1.5 倍，左右留白对称 */
-    {
-        double card_w = MAX(content_w * 1.22, content_w + pad * 2.0);
-        double pad_h  = (card_w - content_w) * 0.5;
-
-        card_w = MIN(card_w, width - L->pad_x * 2.0);
-        pad_h  = MAX(pad_h, 0.0);
-
-        card_draw(cr, L->pad_x, L->stats_y, card_w, block_h + pad * 2.0, L->card_radius);
-
-        x = L->pad_x + pad_h;
-        y = L->stats_y + pad;
-    }
-
-    text_draw(cr, wall, &wall_style, x, y, TEXT_LEFT, 0.0);
-
-    y += L->stats_clock_px * 1.30 + height * 0.008;
-    text_draw(cr, line, &line_style, x, y, TEXT_LEFT, 0.0);
-
-    y += L->stats_px * 1.60 + height * 0.010;
-    draw_heatmap(cr, L, x, y);
+    return g_strdup_printf("LISTENED %s  ·  TODAY %s", total, today);
 }
 
-/* ---------- 左列：备注 / 大时钟 / 歌词 ---------- */
+/* 墙钟 + 收听时长 + 热力图：位置全部由 layout_compute() 给定 */
+static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gchar *line)
+{
+    TextStyle wall_style = TEXT_STYLE(FONT_HAND, L->stats_clock_px, PANGO_WEIGHT_NORMAL,
+                                     0.0, WHITE(0.78));
+    TextStyle line_style = TEXT_STYLE(FONT_MONO, L->stats_px, PANGO_WEIGHT_NORMAL,
+                                     L->stats_px * 0.14, col_dim);
+
+    card_draw(cr, L->stats_x, L->stats_y, L->stats_w, L->stats_h, L->card_radius);
+
+    /* 限宽 = 卡片内容宽度：极端窄窗口下至少会用省略号收住，不会冲出卡片 */
+    text_draw(cr, wall, &wall_style, L->stats_content_x, L->stats_wall_y,
+              TEXT_LEFT, L->stats_content_w);
+    text_draw(cr, line, &line_style, L->stats_content_x, L->stats_line_y,
+              TEXT_LEFT, L->stats_content_w);
+
+    draw_heatmap(cr, L, L->stats_content_x, L->stats_heat_y);
+}
 
 static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
 {
@@ -296,16 +271,20 @@ static void draw_right(cairo_t *cr, const Layout *L)
 /* 画一帧"现在的画面"。背景不在这里画：下面那层 GtkPicture 负责，这层是透明的。 */
 static void draw_stage(cairo_t *cr, int width, int height)
 {
-    g_autofree gchar *clock_text = format_time(media_position(&app.media));
-    int               n_qr       = (app.qr[0].text != NULL ? 1 : 0)
-                                 + (app.qr[1].text != NULL ? 1 : 0);
-    Layout            L;
+    g_autoptr(GDateTime) now        = g_date_time_new_now_local();
+    g_autofree gchar    *clock_text = format_time(media_position(&app.media));
+    g_autofree gchar    *wall       = g_date_time_format(now, "%H:%M:%S");
+    g_autofree gchar    *stats      = stats_summary();
+    int                  n_qr       = (app.qr[0].text != NULL ? 1 : 0)
+                                    + (app.qr[1].text != NULL ? 1 : 0);
+    Layout               L;
 
-    layout_compute(&L, cr, (double)width, (double)height, clock_text, n_qr);
+    /* 布局和绘制用同一份文字：卡片尺寸就是按它量出来的，不会再"内容比卡片高" */
+    layout_compute(&L, cr, (double)width, (double)height, clock_text, n_qr, wall, stats);
 
     draw_left(cr, &L, clock_text);
     draw_right(cr, &L);
-    draw_stats(cr, &L, (double)width, (double)height);
+    draw_stats(cr, &L, wall, stats);
     draw_hint(cr, &L);
 }
 

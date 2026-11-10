@@ -1,13 +1,16 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_PLAYER_H
 #define FOLLOW_PLAYER_H
 
 #include <glib.h>
 
-/* 播放控制：播放列表顺序 / 随机 / 循环、网络地址解析、曲目显示名。
- *
- * 所有"切歌"都必须走 player_play_index()，它会一次性把封面、歌词、二维码、
- * 窗口标题全部换掉 —— 这是唯一的状态入口。
- */
+/* 播放控制 */
 
 /* 播放第 index 首；不可播放时返回 FALSE（只记日志，不动当前状态） */
 gboolean player_play_index(gint index);

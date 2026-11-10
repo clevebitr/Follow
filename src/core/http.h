@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef HTTP_H
 #define HTTP_H
 
@@ -6,11 +13,11 @@
 
 
 typedef struct {
-    char  *body;                 /* 响应正文，NUL 结尾；用 http_response_free 释放 */
-    size_t length;               /* 正文字节数（不含结尾 NUL） */
-    long   status;               /* HTTP 状态码，0 表示传输层就没成功 */
-    char   error[CURL_ERROR_SIZE];   /* 失败原因，成功时为空串 */
-    char  *final_url;            /* 跟完重定向后的最终地址（b23.tv 短链要用），可能为 NULL */
+    char  *body;                        /* 响应正文，NUL 结尾；用 http_response_free 释放 */
+    size_t length;                      /* 正文字节数（不含结尾 NUL） */
+    long   status;                      /* HTTP 状态码，0 表示传输层就没成功 */
+    char   error[CURL_ERROR_SIZE];      /* 失败原因，成功时为空串 */
+    char  *final_url;                   /* 跟完重定向后的最终地址，可能为 NULL */
 } HttpResponse;
 
 /* 进程内调用一次：main() 开头 / 所有线程启动之前。成功返回 0 */

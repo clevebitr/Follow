@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_LYRICSRC_H
 #define FOLLOW_LYRICSRC_H
 
@@ -10,7 +17,7 @@
  *   lrc=netease:耳朵 李荣浩      → 用这个关键词搜索
  *   lrc=netease:186016          → 直接指定歌曲 id
  *   lrc=qq / qq:<关键词> / qq:<songmid>
- *   lrc=F:/x.lrc                → 本地文件（不经过这里）
+ *   lrc=X:/x.lrc                → 本地文件（不经过这里）
  */
 
 typedef struct {

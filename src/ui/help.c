@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "help.h"
 
 #include "theme.h"
@@ -41,7 +48,7 @@ void help_draw(cairo_t *cr, double width, double height)
     key_x   = panel_x + panel_w * 0.10;
     desc_x  = panel_x + panel_w * 0.30;
 
-    /* 压暗整屏，让面板浮出来 */
+    /* 压暗整屏 */
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.62);
     cairo_rectangle(cr, 0.0, 0.0, width, height);
     cairo_fill(cr);

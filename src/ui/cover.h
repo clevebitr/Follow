@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_COVER_H
 #define FOLLOW_COVER_H
 
@@ -5,10 +12,9 @@
 
 #include "config.h"
 
-/* 封面：本地文件直接读，http(s) 地址在后台线程下载并落到缓存目录。
- * 解码统一走 gdk-pixbuf（通道序可靠），再转成 cairo surface。 */
+/* 封面 */
 
-/* 换成这张曲目的封面（track 为 NULL / 没有 pic 就是清空） */
+/* 换成这张曲目的封面 */
 void cover_set(const AudioTrack *track);
 
 /* 丢掉当前封面和缩放缓存 */

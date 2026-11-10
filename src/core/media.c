@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #define MINIAUDIO_IMPLEMENTATION
 #include <stdarg.h>
 #include <stdio.h>
@@ -20,7 +27,7 @@
 /* 一次解码最多产出多少帧：aac 1024、mp3 1152、opus 960，留大一点 */
 #define MEDIA_DECODE_CHUNK 8192
 
-/* ---------- ffmpeg 上下文 ---------- */
+/* ffmpeg 上下文 */
 
 typedef struct {
     AVFormatContext *fmt;
@@ -43,8 +50,7 @@ static char *dup_headers_or_null(const char *headers)
     return (headers != NULL && *headers != '\0') ? g_strdup(headers) : NULL;
 }
 
-/* ---------- 环形缓冲 ---------- */
-
+/* 环形缓冲 */
 static ma_uint64 ring_free_frames(Media *m)
 {
     ma_uint64 w = __atomic_load_n(&m->ring_write, __ATOMIC_ACQUIRE);
@@ -87,8 +93,7 @@ static void ring_push(Media *m, const float *src, ma_uint32 frames)
     __atomic_store_n(&m->ring_write, w, __ATOMIC_RELEASE);
 }
 
-/* ---------- 音频回调：只搬样本 ---------- */
-
+/*  音频回调 */
 static void media_data_callback(ma_device *device, void *output, const void *input,
                                 ma_uint32 frame_count)
 {
@@ -138,7 +143,7 @@ static void media_data_callback(ma_device *device, void *output, const void *inp
     }
 }
 
-/* ---------- ffmpeg ---------- */
+/* ffmpeg */
 
 static void ff_close(FFMedia *ff)
 {
@@ -381,11 +386,11 @@ static int ff_decode_some(FFMedia *ff, Media *m)
 }
 
 /* 返回 FALSE 表示这个流不支持随机访问（有些 CDN 不接受 Range 请求），
- * 调用方必须保持原来的播放位置，否则会被误当成"放完了"。 */
+ * 调用方必须保持原来的播放位置，否则会被误当成播放结束。 */
 static gboolean ff_seek(FFMedia *ff, ma_uint64 frame, Media *m)
 {
     gint64 us = (gint64)((double)frame * 1000000.0 / (double)m->sample_rate);
-    /* stream_index = -1 时时间戳单位是 AV_TIME_BASE（微秒）；
+    /* stream_index = -1 时，时间戳单位是 AV_TIME_BASE（微秒）；
      * 传具体流索引的话得先换算到该流的 time_base —— 之前混用导致 seek 直接跳到文件末尾。 */
     int    result = avformat_seek_file(ff->fmt, -1, INT64_MIN, us, INT64_MAX,
                                        AVSEEK_FLAG_BACKWARD);
@@ -411,7 +416,7 @@ static gboolean ff_seek(FFMedia *ff, ma_uint64 frame, Media *m)
     return TRUE;
 }
 
-/* ---------- 解码线程 ---------- */
+/* 解码线程 */
 
 static gpointer media_decode_thread(gpointer data)
 {
@@ -474,7 +479,7 @@ static gpointer media_decode_thread(gpointer data)
                 __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
                 __atomic_store_n(&m->cursor, (ma_uint64)seek, __ATOMIC_RELEASE);
             } else {
-                /* seek 失败：位置和缓冲都保持不动，继续放；
+                /* seek 失败：位置和缓冲都保持不动，继续播放；
                  * 同时把 UI 那边的光标拉回真实播放位置，避免进度条乱跳 */
                 __atomic_store_n(&m->cmd_seek, (ma_int64)-1, __ATOMIC_RELEASE);
             }
@@ -490,7 +495,7 @@ static gpointer media_decode_thread(gpointer data)
             continue;
         }
 
-        /* 缓冲快满就先歇着，别把网络读得太凶 */
+        /* 缓冲快满就先暂停，别把网络读得太凶 */
         if (ring_free_frames(m) < MEDIA_DECODE_CHUNK) {
             g_usleep(3000);
             continue;
@@ -505,8 +510,7 @@ static gpointer media_decode_thread(gpointer data)
     return NULL;
 }
 
-/* ---------- 对外接口 ---------- */
-
+/* 对外接口 */
 int media_init(Media *m)
 {
     ma_device_config config;

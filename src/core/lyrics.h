@@ -1,9 +1,16 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_LYRICS_H
 #define FOLLOW_LYRICS_H
 
 #include <glib.h>
 
-/* LRC 解析：只要"播放时按时间取当前行"这一件事。
+/* LRC 解析：
  *
  * 支持：`[mm:ss.xx]` 时间戳（一行多个）、`[offset:]`、`[ti:]/[ar:]`、
  * 行内 `<mm:ss.xx>`（直接剥掉）；不是 UTF-8 的按 GB18030 转换（中文 .lrc 大多是 GBK）。 */
@@ -20,10 +27,10 @@ typedef struct {
     gchar     *artist;
 } Lyrics;
 
-/* 读本地 .lrc；读不到 / 里���没有一行带时间戳就返回 NULL */
+/* 读本地 .lrc；读不到；没有一行带时间戳就返回 NULL */
 Lyrics *lyrics_load_file(const char *path);
 
-/* 直接从一段 LRC 文本构建（在线歌词源拉回来的就是这种） */
+/* 直接从一段 LRC 文本构建 */
 Lyrics *lyrics_load_text(const gchar *content);
 
 void lyrics_free(Lyrics *lyrics);

@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include <string.h>
 
 #include <json-glib/json-glib.h>
@@ -8,7 +15,6 @@
 #define NETEASE_REFERER "Referer: https://music.163.com/\r\n"
 #define QQ_REFERER      "Referer: https://y.qq.com/\r\n"
 
-/* ---------- 小工具 ---------- */
 
 static const char *obj_str(JsonObject *obj, const char *member)
 {
@@ -119,7 +125,7 @@ static gchar *html_unescape(const gchar *text)
     return g_string_free(out, FALSE);
 }
 
-/* 判断一份 LRC 是不是"根本没时间轴"（比如只有一行 [00:00.00]作词:xxx） */
+/* 判断一份 LRC 存不存在时间轴 */
 static gboolean lrc_has_timing(const gchar *lrc)
 {
     gint count = 0;
@@ -136,7 +142,7 @@ static gboolean lrc_has_timing(const gchar *lrc)
     return FALSE;
 }
 
-/* ---------- 网易云 ---------- */
+/* 网易云 */
 
 static gchar *netease_search(const gchar *query, gchar **matched, gchar **error)
 {
@@ -242,7 +248,7 @@ static gchar *netease_lyric(const gchar *id, gchar **error)
     return out;
 }
 
-/* ---------- QQ 音乐 ---------- */
+/* QQ 音乐 */
 
 static gchar *qq_search(const gchar *query, gchar **matched, gchar **error)
 {
@@ -355,7 +361,7 @@ static gchar *qq_lyric(const gchar *mid, gchar **error)
     return out;
 }
 
-/* ---------- 对外接口 ---------- */
+/* 对外接口 */
 
 gboolean lyricsrc_parse(const gchar *spec, gchar **provider, gchar **rest)
 {

@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "backdrop.h"
 
 #include <math.h>
@@ -13,8 +20,6 @@
 #define BG_BLUR_DIM   160      /* 先把封面缩到这个长边再模糊 */
 #define BG_FRAME_SEC  0.0333   /* 30fps 一帧推进的相位 */
 
-/* 逐级减半缩小的模糊：cairo 的双线性放大把 160px 的小图摊开就是柔和模糊，
- * 比手写卷积快得多（iTunes 那个 blur 也是这么做的）。 */
 static cairo_surface_t *blur_surface(cairo_surface_t *src, int max_dim)
 {
     cairo_surface_t *cur;
@@ -54,7 +59,7 @@ static cairo_surface_t *blur_surface(cairo_surface_t *src, int max_dim)
     return cur;
 }
 
-/* 小纹理的尺寸：宽度固定，高度跟着窗口宽高比走（避免拉伸变形） */
+/* 小纹理的尺寸 */
 static void bg_small_size(int width, int height, int *out_w, int *out_h)
 {
     int h;
@@ -156,7 +161,7 @@ static GdkTexture *texture_from_surface(cairo_surface_t *surface)
     return texture;
 }
 
-/* RGB → HSV 平移色相 → RGB：让渐变颜色随时间缓慢呼吸 */
+/* RGB → HSV 平移色相 → RGB */
 static void hue_shift(double *r, double *g, double *b, double degrees)
 {
     double max = MAX(*r, MAX(*g, *b));
@@ -194,7 +199,7 @@ static void hue_shift(double *r, double *g, double *b, double degrees)
     *b += m;
 }
 
-/* 三团渐变：位置 / 半径 / 透明度按不同频率缓慢漂移，形成"流动"感 */
+/* 三团渐变：位置 / 半径 / 透明度按不同频率缓慢漂移 */
 static void render_frame(void)
 {
     struct Blob {
@@ -233,8 +238,7 @@ static void render_frame(void)
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-    /* 背景退潮：新底图先铺满（退潮后露出来的"海底"），旧底图整块左移退出，
-     * 它的右边缘带着一条渐隐带滑走 —— 这两层一叠，就是两张背景在"交融"。 */
+    /* 背景退潮：新底图先铺满，旧底图整块左移退出，它的右边缘带着一条渐隐带滑走 */
     if (app.bg_base != NULL) {
         cairo_set_source_surface(cr, app.bg_base, 0.0, 0.0);
         cairo_paint(cr);
@@ -299,7 +303,7 @@ static void render_frame(void)
 
 void backdrop_swap(void)
 {
-    /* 换封面：把当前底图和种子色留作退场用，并开始退潮过渡 */
+    /* 换封面：把当前底图和种子色留作退场用，并开始退场过渡 */
     g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
 
     if (app.bg_base != NULL) {

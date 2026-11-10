@@ -1,10 +1,17 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #ifndef FOLLOW_PLATFORM_H
 #define FOLLOW_PLATFORM_H
 
 #include <cairo.h>
 #include <glib.h>
 
-/* 曲目来源平台：决定二维码下面那个胶囊徽标的图标、颜色和名字。
+/* 曲目来源平台：决定胶囊徽标的图标、颜色和名字。
  * 平台从 URL 的主机名自动识别，也可以在 ini 里用 platform= 强制指定。 */
 
 typedef enum {
@@ -27,8 +34,8 @@ void        platform_brand_color(Platform p, double *r, double *g, double *b);
 /* 在 (x, y, size, size) 的方块里画品牌色底 + 白色符号 */
 void        platform_draw_icon(cairo_t *cr, Platform p, double x, double y, double size);
 
-/* 官方字标（wordmark）：有就按 max_h / max_w 等比缩放，返回实际尺寸。
- * 品牌名不再自己排字，胶囊里直接贴官方 logo —— 没有字标的平台返回 FALSE，
+/* 官方字标有就按 max_h / max_w 等比缩放，返回实际尺寸。
+ * 胶囊里直接贴官方 logo —— 没有字标的平台返回 FALSE，
  * 调用方自己退回"图标 + 文字"。 */
 gboolean    platform_wordmark_size(Platform p, double max_h, double max_w,
                                    double *out_w, double *out_h);

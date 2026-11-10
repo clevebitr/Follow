@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "lyricview.h"
 
 #include <string.h>
@@ -9,7 +16,7 @@
 #include "lyricsrc.h"
 #include "ui.h"
 
-/* 在音频所在目录里找一个 .lrc：精确同名 → 同前缀 → 目录里唯一一个 */
+/* 在音频所在目录里找一个 .lrc */
 static gchar *find_lrc_in_dir(const char *dir, const char *stem)
 {
     g_autoptr(GDir) d           = NULL;
@@ -52,7 +59,7 @@ static gchar *find_lrc_in_dir(const char *dir, const char *stem)
     return NULL;
 }
 
-/* ---------- 在线歌词源（后台线程 + 缓存） ---------- */
+/* 在线歌词源（后台线程 + 缓存） */
 
 typedef struct {
     guint    gen;
@@ -141,7 +148,7 @@ static gpointer lyrics_thread(gpointer data)
     return NULL;
 }
 
-/* 音频时长和歌词总长差得多 → 提示可能是不同版本（片头 / 剪辑 / TV-size） */
+/* 音频时长和歌词总长差得多 → 提示可能是不同版本 */
 static void report_fit(void)
 {
     double duration, lrc_end, diff;
@@ -167,8 +174,6 @@ static void report_fit(void)
                   -diff, diff * 1000.0);
     }
 }
-
-/* ---------- 对外接口 ---------- */
 
 void lyricview_load(const AudioTrack *track)
 {
@@ -298,7 +303,7 @@ void lyricview_sync(double position_sec)
     }
 
     /* 歌词时间轴是按原始音频做的；视频源可能带片头/剪辑，
-     * 所以用 offset 把播放位置平移一下（正数 = 歌词延后） */
+     * 所以用 offset 把播放位置平移一下 */
     line = lyrics_line_at(app.lyrics,
                           position_sec - (double)app.lrc_offset_ms / 1000.0);
 

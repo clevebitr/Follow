@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include "fx.h"
 
 void fx_begin(Fx *fx, double duration_sec)
@@ -33,7 +40,7 @@ double fx_t(Fx *fx)
     x = (double)(g_get_monotonic_time() - fx->started_us) / 1000000.0 - fx->delay;
 
     if (x <= 0.0)
-        return 0.0;                    /* 还在延迟里：画面保持原样 */
+        return 0.0;                                /* 还在延迟里：画面保持原样 */
 
     x /= fx->duration;
 

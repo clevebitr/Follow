@@ -1,3 +1,10 @@
+/**
+ * created: 2026/11/10
+ * author: clevebitr
+ * github: https://github.com/clevebitr
+ * last modified: 2026/11/10
+*/
+
 #include <string.h>
 
 #include <json-glib/json-glib.h>
@@ -16,8 +23,6 @@ gchar *bilibili_request_headers(void)
 {
     return g_strdup(BILI_PLAY_HEADERS);
 }
-
-/* ---------- 小工具 ---------- */
 
 static const char *obj_str(JsonObject *obj, const char *member)
 {
@@ -57,7 +62,6 @@ static gboolean is_bv_char(char c)
     return g_ascii_isalnum(c);
 }
 
-/* 从链接里抠出 BV 号（BV + 10 位）；没有就返回 NULL */
 static gchar *extract_bvid(const char *url)
 {
     const char *p = url;
@@ -81,7 +85,6 @@ static gchar *extract_bvid(const char *url)
     return NULL;
 }
 
-/* 从链接里抠出 av 号（数字部分）；没有就返回 NULL */
 static gchar *extract_aid(const char *url)
 {
     const char *p = url;
@@ -115,11 +118,9 @@ static JsonObject *parse_json_object(const char *body, GError **error)
     if (root == NULL || !JSON_NODE_HOLDS_OBJECT(root))
         return NULL;
 
-    /* 注意：返回的对象由 parser 持有，这里拷一份深拷贝更省心 */
     return json_object_ref(json_node_get_object(root));
 }
 
-/* 把 B 站 API 的 {"code":..,"message":..,"data":..} 解出 data */
 static JsonObject *bili_call(const char *url, gchar **error)
 {
     HttpResponse   resp = {0};
@@ -165,7 +166,6 @@ static JsonObject *bili_call(const char *url, gchar **error)
         return NULL;
     }
 
-    /* root 只是用来拿 data，这里把 data 深拷出来，然后释放 root */
     {
         JsonObject *copy = json_object_ref(data);
 
@@ -175,8 +175,6 @@ static JsonObject *bili_call(const char *url, gchar **error)
         return copy;
     }
 }
-
-/* ---------- view 元数据缓存（bvid → cid/title/artist）---------- */
 
 static gchar *view_cache_path(const gchar *bvid)
 {
@@ -229,7 +227,6 @@ static void view_cache_save(const gchar *bvid, gint64 cid,
     g_file_set_contents(path, body, -1, NULL);
 }
 
-/* ---------- 主流程 ---------- */
 
 int bilibili_resolve(const char *page_url, gchar **audio_url,
                      gchar **title, gchar **artist, gchar **error)
@@ -255,7 +252,6 @@ int bilibili_resolve(const char *page_url, gchar **audio_url,
     if (error != NULL)
         *error = NULL;
 
-    /* 短链先跟一次重定向，拿到真正的 /video/BVxxx 地址 */
     if (strstr(url, "b23.tv") != NULL || strstr(url, "bili2233.cn") != NULL) {
         HttpResponse resp = {0};
 
@@ -277,7 +273,6 @@ int bilibili_resolve(const char *page_url, gchar **audio_url,
         return -1;
     }
 
-    /* 1) 取 cid / 标题 / UP 主（先用缓存，避免每次播放都打接口） */
     if (bvid != NULL && view_cache_load(bvid, &cid, title, artist)) {
         g_message("bilibili: metadata cache hit (%s)", bvid);
         goto have_cid;
@@ -294,7 +289,6 @@ int bilibili_resolve(const char *page_url, gchar **audio_url,
     cid = obj_int(view, "cid", 0);
 
     if (cid == 0) {
-        /* 分 P 视频：data.cid 也存在，但保险起见看 pages[0] */
         JsonArray *pages = json_object_get_array_member(view, "pages");
 
         if (pages != NULL && json_array_get_length(pages) > 0) {
@@ -341,7 +335,6 @@ have_cid:
         return -1;
     }
 
-    /* 2) 取 DASH 音轨里码率最高的一条 */
     play_url = bvid != NULL
         ? g_strdup_printf("https://api.bilibili.com/x/player/playurl"
                           "?bvid=%s&cid=%" G_GINT64_FORMAT "&fnval=16&fourk=1", bvid, cid)
@@ -384,7 +377,6 @@ have_cid:
         }
     }
 
-    /* 没有 DASH 就退回 durl（老接口，通常是整段 mp4 的地址） */
     if (best_url == NULL) {
         JsonArray *durl = json_object_get_array_member(play, "durl");
 

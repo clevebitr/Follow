@@ -3,6 +3,8 @@
 
 #include <glib.h>
 
+//TODO:ini define
+
 /* 统一的磁盘缓存目录：<user cache>/follow/
  * 歌词、封面、B 站元数据都放这里，按 key 的 md5 命名。 */
 
