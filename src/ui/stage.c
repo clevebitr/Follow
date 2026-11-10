@@ -18,6 +18,7 @@
 #include "help.h"
 #include "layout.h"
 #include "player.h"
+#include "playlist.h"
 #include "qrcard.h"
 #include "stats.h"
 #include "theme.h"
@@ -346,6 +347,20 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
 
     if (width <= 0 || height <= 0)
         return;
+
+    /* 播放列表是全屏页：盖掉 stage，只留下面那层动态背景 */
+    if (playlist_is_open()) {
+        /* 退出歌曲墙时把主界面垫在下面，页面淡出时能看见它 */
+        if (playlist_is_closing())
+            draw_stage(cr, width, height);
+
+        playlist_draw(cr, (double)width, (double)height);
+
+        if (app.help)
+            help_draw(cr, (double)width, (double)height);
+
+        return;
+    }
 
     p = app.snapshot != NULL ? fx_t(&app.fx_stage) : 1.0;
 

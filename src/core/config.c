@@ -154,6 +154,24 @@ static gboolean config_get_bool(GKeyFile *kf, const gchar *group, const gchar *k
     return fallback;
 }
 
+static double config_get_double(GKeyFile *kf, const gchar *group, const gchar *key,
+                                double fallback)
+{
+    g_autofree gchar *raw = config_get_string(kf, group, key);
+    gchar            *end = NULL;
+    double            value;
+
+    if (raw == NULL || *raw == '\0')
+        return fallback;
+
+    value = g_ascii_strtod(raw, &end);
+
+    if (end == raw || (end != NULL && *g_strstrip(end) != '\0'))
+        return fallback;
+
+    return value;
+}
+
 /* 歌词偏移：写毫秒或秒都行，也接受后缀。
  *   2500 / 2500ms / 2.5s  → 2500 毫秒
  *   -7.5  / -7.5s         → -7500 毫秒
@@ -223,6 +241,10 @@ static void config_reset(void)
     g_free(g_config.note);
     g_free(g_config.cache_dir);
     g_free(g_config.user_agent);
+    g_free(g_config.viz_effect);
+
+    for (int i = 0; i < KEY_ACTION_COUNT; i++)
+        g_free(g_config.key_bind[i]);
 
     g_config.width       = WINDOW_WIDTH;
     g_config.height      = WINDOW_HEIGHT;
@@ -234,10 +256,20 @@ static void config_reset(void)
     g_config.repeat      = REPEAT_ALL;   /* 默认列表循环 */
     g_config.shuffle     = FALSE;
     g_config.cache_dir   = NULL;         /* NULL = <用户缓存目录>/follow */
+    g_config.resolve_ttl    = 2700;      /* 45 分钟 */
+    g_config.audio_cache    = FALSE;     /* 默认不落音频 */
+    g_config.audio_max_mb   = 512;
+    g_config.cover_max_mb   = 128;
+    g_config.animations     = TRUE;
+    g_config.viz_effect  = g_strdup("dust");
+    g_config.viz_particles = 150;
+    g_config.viz_gain      = 1.0;
     g_config.user_agent  = NULL;         /* NULL = 内置的浏览器 UA */
     g_config.proxy       = NULL;         /* NULL = 直连 */
     g_config.http_timeout    = 0;        /* 0 = HTTP_DEFAULT_TIMEOUT */
     g_config.connect_timeout = 0;        /* 0 = HTTP_DEFAULT_CONNECT_TIMEOUT */
+
+    memset(g_config.key_bind, 0, sizeof(g_config.key_bind));
 }
 
 const APPconfig *config_get(void)
@@ -460,12 +492,47 @@ const APPconfig *config_load(const char *path)
         g_config.connect_timeout = config_get_int(kf, "net", "connect_timeout", 0);
     }
 
+    /* [ui] 动效总开关 */
+    g_config.animations = config_get_bool(kf, "ui", "animations", TRUE);
+
     /* [net] proxy：YouTube 这类在国内需要代理，curl 和 FFmpeg 都用它 */
     {
         g_autofree gchar *proxy = config_get_string(kf, "net", "proxy");
 
         g_free(g_config.proxy);
         g_config.proxy = (proxy != NULL && *proxy != '\0') ? g_steal_pointer(&proxy) : NULL;
+    }
+
+    /* [visualizer] 背景粒子：off / dust / warp / flow */
+    {
+        g_autofree gchar *effect = config_get_string(kf, "visualizer", "effect");
+
+        g_free(g_config.viz_effect);
+        g_config.viz_effect = (effect != NULL && *effect != '\0')
+            ? g_steal_pointer(&effect) : g_strdup("dust");
+
+        g_config.viz_particles = config_get_int(kf, "visualizer", "particles", 150);
+        g_config.viz_gain      = config_get_double(kf, "visualizer", "gain", 1.0);
+    }
+
+    /* [keys]：值原样留着，由 keymap 统一解析；不认识的键名只记一条日志 */
+    {
+        gsize   n_keys = 0;
+        g_auto(GStrv) keys = g_key_file_get_keys(kf, "keys", &n_keys, NULL);
+
+        if (keys != NULL) {
+            for (gsize i = 0; i < n_keys; i++) {
+                gint action = keymap_action_from_name(keys[i]);
+
+                if (action < 0) {
+                    g_debug("keys: unknown action \"%s\"", keys[i]);
+                    continue;
+                }
+
+                g_free(g_config.key_bind[action]);
+                g_config.key_bind[action] = config_get_string(kf, "keys", keys[i]);
+            }
+        }
     }
 
     config_load_tracks(kf, &g_config);
@@ -486,6 +553,10 @@ void config_free(void)
     g_free(g_config.cache_dir);
     g_free(g_config.user_agent);
     g_free(g_config.proxy);
+    g_free(g_config.viz_effect);
+
+    for (int i = 0; i < KEY_ACTION_COUNT; i++)
+        g_free(g_config.key_bind[i]);
 
     g_config = (APPconfig){ 0 };
     g_loaded = FALSE;
@@ -520,4 +591,74 @@ const gchar *config_proxy(void)
     const APPconfig *cfg = config_get();
 
     return (cfg->proxy != NULL && *cfg->proxy != '\0') ? cfg->proxy : NULL;
+}
+
+const gchar *config_viz_effect(void)
+{
+    const APPconfig *cfg = config_get();
+
+    return (cfg->viz_effect != NULL && *cfg->viz_effect != '\0')
+        ? cfg->viz_effect : "dust";
+}
+
+gint config_viz_particles(void)
+{
+    gint n = config_get()->viz_particles;
+
+    return n > 0 ? MIN(n, 400) : 150;
+}
+
+double config_viz_gain(void)
+{
+    double gain = config_get()->viz_gain;
+
+    if (!isfinite(gain) || gain <= 0.0)
+        return 1.0;
+
+    return CLAMP(gain, 0.2, 4.0);
+}
+
+const gchar *config_key_binding(KeyAction action)
+{
+    if (action < 0 || action >= KEY_ACTION_COUNT)
+        return NULL;
+
+    return config_get()->key_bind[action];
+}
+
+gint config_resolve_ttl(void)
+{
+    gint ttl = config_get()->resolve_ttl;
+
+    return CLAMP(ttl, 0, 86400);
+}
+
+gboolean config_audio_cache(void)
+{
+    return config_get()->audio_cache;
+}
+
+guint64 config_audio_max_bytes(void)
+{
+    gint mb = config_get()->audio_max_mb;
+
+    if (mb <= 0)
+        mb = 512;
+
+    return (guint64)CLAMP(mb, 16, 16384) * 1024ULL * 1024ULL;
+}
+
+guint64 config_cover_max_bytes(void)
+{
+    gint mb = config_get()->cover_max_mb;
+
+    if (mb <= 0)
+        mb = 128;
+
+    return (guint64)CLAMP(mb, 16, 8192) * 1024ULL * 1024ULL;
+}
+
+gboolean config_animations(void)
+{
+    return config_get()->animations;
 }

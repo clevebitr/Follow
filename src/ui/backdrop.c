@@ -18,9 +18,11 @@
 #include "cover.h"
 #include "texture.h"
 #include "theme.h"
+#include "playlist.h"
 #include "ui.h"
+#include "viz.h"
 
-#define BG_WIDTH      256      /* 小纹理的宽度，放大交给 GPU */
+#define BG_WIDTH      512      /* 小纹理的宽度，放大交给 GPU */
 #define BG_BLUR_DIM   160      /* 先把封面缩到这个长边再模糊 */
 #define BG_FRAME_SEC  0.0333   /* 30fps 一帧推进的相位 */
 
@@ -289,6 +291,9 @@ static void render_frame(void)
         cairo_pattern_destroy(p);
     }
 
+    /* 音频粒子：画在 scrim 之前，所以会被压暗，不会抢文字 */
+    viz_draw(cr, (double)sw, (double)sh, &pal);
+
     /* 压暗，保证白字 / 二维码可读 */
     {
         cairo_pattern_t *scrim = cairo_pattern_create_linear(0.0, 0.0, 0.0, (double)sh);
@@ -315,6 +320,8 @@ void backdrop_swap(void)
         app.pal_bg_prev = app.palette;
         fx_begin(&app.fx_bg, 1.10);
     }
+
+    viz_burst();
 }
 
 void backdrop_invalidate(void)
@@ -330,6 +337,7 @@ void backdrop_drop(void)
     g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
     g_clear_pointer(&app.bg_frame, cairo_surface_destroy);
     fx_stop(&app.fx_bg);
+    viz_reset();
 }
 
 void backdrop_push(int width, int height)
@@ -354,6 +362,11 @@ void backdrop_push(int width, int height)
     build_base(width, height);
     render_frame();
 
+    /* 小纹理放大到全屏时，高质量缩放滤镜会在亮点周围拉出振铃；
+     * 粒子层先做一次 1px 盒式模糊，把高频压掉，环就没了。 */
+    if (viz_active())
+        surface_box_blur(app.bg_frame, 1, 1);
+
     if (app.bg_picture != NULL) {
         GdkTexture *texture = texture_from_surface(app.bg_frame);
 
@@ -374,7 +387,12 @@ gboolean backdrop_tick(gpointer data)
     if (width <= 0 || height <= 0 || !gtk_widget_get_mapped(app.window))
         return G_SOURCE_CONTINUE;
 
+    /* 歌曲墙自己就是全屏画面：暂停背景粒子/模糊，把 CPU 让给磁贴动画 */
+    if (playlist_is_open() && !playlist_is_closing())
+        return G_SOURCE_CONTINUE;
+
     app.bg_phase += BG_FRAME_SEC;
+    viz_tick();
     backdrop_push(width, height);
 
     return G_SOURCE_CONTINUE;

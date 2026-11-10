@@ -43,10 +43,10 @@ headerbar {
 
 headerbar label,
 headerbar .title {
-  color: rgba(230, 230, 232, 0.25);
-  font-family: "Iosevka", "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
+  color: rgb(251, 251, 254);
+  font-family: "Iosevka", "Noto Sans SC", "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
   font-feature-settings: "tnum";
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
 }
 

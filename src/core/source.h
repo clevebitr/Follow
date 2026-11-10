@@ -26,11 +26,15 @@ typedef struct {
     gchar   *title;     /* 网络来源解析出来的标题，可为 NULL */
     gchar   *artist;
     gboolean resolved;  /* TRUE = 经过解析器 */
+    gboolean from_cache;/* TRUE = 来自解析结果缓存 */
     gboolean ranged;    /* TRUE = 播放时要走定长 Range 分块读（googlevideo） */
 } MediaSource;
 
 /* 成功返回 0；失败返回 -1 并给出 *error */
 int  source_resolve(const char *uri, MediaSource *out, gchar **error);
 void source_clear(MediaSource *s);
+
+/* 丢掉某个页面的解析缓存（缓存的直链失效时重试用） */
+void source_cache_invalidate(const char *uri);
 
 #endif /* FOLLOW_SOURCE_H */

@@ -28,6 +28,7 @@
 #define MEDIA_CHANNELS        2
 #define MEDIA_FALLBACK_RATE   48000
 #define MEDIA_BUFFER_SECONDS  3      /* 环形缓冲长度（秒） */
+#define MEDIA_SCOPE_SAMPLES   2048   /* 给可视化用的最近样本数（单声道） */
 
 typedef enum {
     MEDIA_STOPPED = 0,
@@ -47,6 +48,11 @@ struct _Media {
     ma_uint32  ring_frames;     /* 容量（帧） */
     ma_uint64  ring_write;      /* 原子：写入游标（单调递增） */
     ma_uint64  ring_read;       /* 原子：读出游标（单调递增） */
+
+    /* 可视化取样环：音频回调把输出下混成单声道写进来，UI 线程按帧读最近一段。
+     * 同样是 SPSC，读的时候允许轻微撕裂 —— 画面看不出来。 */
+    float     *scope;
+    ma_uint64  scope_write;     /* 原子：写入游标（单调递增） */
 
     /* 状态（原子读写） */
     int        state;
@@ -103,5 +109,9 @@ void media_begin_track(Media *m);
 
 /* 最近一次加载失败的原因；没有错误返回 NULL */
 const char *media_error(Media *m);
+
+/* 取最近 n 个单声道样本，写进 dst（不够的补 0）。
+ * 只给可视化线程用：不加锁，返回真正拿到的样本数。 */
+int  media_read_scope(Media *m, float *dst, int n);
 
 #endif /* MEDIA_H */

@@ -24,4 +24,8 @@ gchar *follow_cache_dir(void);
 /* 拼一个缓存文件路径：<dir>/<prefix>-<md5(key)>.<ext> */
 gchar *follow_cache_file(const gchar *prefix, const gchar *key, const gchar *ext);
 
+/* 统计 / 清理某一类缓存（文件名前缀 prefix-）。按 mtime 从旧到新删到上限以内。 */
+guint64 cache_prefix_bytes(const gchar *prefix);
+void    cache_prune_prefix(const gchar *prefix, guint64 max_bytes);
+
 #endif /* FOLLOW_CACHE_H */

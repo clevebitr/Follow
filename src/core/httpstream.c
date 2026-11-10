@@ -303,7 +303,7 @@ AVIOContext *httpstream_avio_open(const char *url, const char *headers, gchar **
         return NULL;
     }
 
-    /* 这块缓冲由 FFmpeg 负责释放（av_freep → 在 Windows 上是 _aligned_free），
+    /* 这块缓冲由 FFmpeg 负责释放，
      * 必须用 av_malloc 系列分配，不能给 g_malloc 的指针。 */
     iobuf = av_malloc(4096);
     pb    = avio_alloc_context(iobuf, 4096, 0, s, stream_read, NULL, stream_seek);

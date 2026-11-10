@@ -25,6 +25,7 @@
 ### 画面
 
 - **动态背景**：封面模糊打底 + 从封面里取的三团种子色缓慢漂移，随换曲一起换色
+- **音频粒子背景**：`[visualizer] effect = dust / warp / flow` 三套预设，采样真实播放的音频做 1024 点 FFT，低频 / 中频 / 高频分别驱动粒子的速度、大小和亮度；颜色取自封面，画在压暗层之前，不会盖住文字
 - **换曲过渡**：旧背景「退潮」左移滑走，新组件「撤桌重上」从右侧推入；两层故意不同步，看起来像两次动作而不是整块搬走
 - **自适应版面**：字号和位置全部按窗口尺寸算，1920×1080 到小窗口、窗口宽度窄到两栏要撞时都会自动收，时钟太长会自己缩字号
 - 两种字体：界面是 Iosevka + Noto Sans SC，只有时间用手写体
@@ -36,6 +37,14 @@
 - **在线歌词**：`lrc=netease:李荣浩 耳朵` / `lrc=qq:186016`，取回带时间轴的歌词并缓存，重复播放不再联网
 - 取回后还会检查「音频和歌词时长差太多」并提示换源
 - **歌词偏移**：`[` / `]` 边听边调 250 ms，`\` 复原 —— 视频带片头的情况很好用
+
+### 歌曲墙
+
+- `Tab` 打开全屏歌曲墙：block 思路参考 Folia 的 `12 × 8` poster wall，用我们自己的槽位变体做 Windows 动态磁贴式混排（6×4 / 4×4 / 3×2 / 2×2 …）
+- 封面磁贴：大封面 + 底部渐变标题 / 艺人、右上角平台角标；当前曲目左侧强调条 + `♪`，选中的磁贴是白色描边
+- `← ↑ ↓ →` 空间导航，`PageUp` / `PageDown` 翻一屏，`Home` / `End` 首尾，`Enter` 或 `Space` 播放并返回
+- 鼠标悬停高亮，单击磁贴立即播放并返回；滚轮上下滚动；不满一个 block 的空位用低对比度 `FOLLOW` 装饰磁贴补齐
+- 开关键、关闭键以及所有播放快捷键都能在 `[keys]` 里改
 
 ### 二维码
 
@@ -63,9 +72,13 @@
 | `[` / `]` | 歌词提前 / 延后 250 ms |
 | `\` | 歌词偏移恢复成 ini 里的值 |
 | `F` / `F11` | 全屏（没有标题栏，就是参考布局那个观感） |
+| `Tab` | 打开 / 关闭歌曲墙 |
 | `F1` | 快捷键页 |
 | `Q` | 退出 |
-| `Esc` | 关掉快捷键页 / 退出全屏 |
+| `Esc` | 关掉歌曲墙 / 快捷键页 / 退出全屏 |
+
+> 上面只是默认值。所有动作都可以在 `src/config.ini` 的 `[keys]` 组里改，
+> 用逗号分隔多个键；`F1` 打开的快捷键页会显示当前实际绑定。
 
 ## 开始使用
 
@@ -110,6 +123,30 @@ link=https://live.bilibili.com/1840990819
 #connect_timeout=5                # 建连超时（秒）
 #proxy=http://127.0.0.1:7890      # 代理：YouTube 必填，curl 和 FFmpeg 都走它
 
+[visualizer]
+effect=dust                       # off / dust / warp / flow
+#particles=150                    # 20 - 400
+#gain=1.0                         # 音频灵敏度 0.2 - 4.0
+
+[keys]
+play_pause=space
+seek_back=Left
+seek_forward=Right
+next=n
+prev=p
+restart=r
+stop=s
+repeat=l
+shuffle=h
+lyric_earlier=bracketleft
+lyric_later=bracketright
+lyric_reset=backslash
+fullscreen=f, F11                 # 逗号分隔多个键
+help=F1
+playlist=Tab
+back=Escape
+quit=q                            # off / none 表示解绑
+
 [audio1]
 link=src/assets/xxx.mp3     # 本地路径或 http(s) URL
 title=耳朵
@@ -150,6 +187,7 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 页面链接同样
 | FFmpeg | 本地 / 网络音频解码 |
 | libcurl + JSON-GLib | 网络请求与接口解析（B 站 / YouTube / 歌词源）、YouTube 分块拉流 |
 | libqrencode + librsvg | 二维码与品牌矢量图标 |
+| 自带 FFT | 可视化用的 1024 点 radix-2 FFT，不依赖 FFTW / libvisual |
 
 ---
 
@@ -178,6 +216,8 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 页面链接同样
 | `qrcode` | `link` / `label` | 只对 `http(s)` 地址显示；`label` 默认取主机名 |
 | `cache` | `dir` | 歌词 / 封面 / B 站元数据 / 收听统计的落地目录，默认 `<用户缓存>/follow` |
 | `net` | `user_agent` / `timeout` / `connect_timeout` / `proxy` | 网络默认值；UA 留空用内置浏览器 UA，超时单位秒，`proxy` 同时作用于 curl 与 FFmpeg |
+| `visualizer` | `effect` / `particles` / `gain` | 音频粒子背景：`off` / `dust`（默认）/ `warp` / `flow`，粒子数 20–400，灵敏度 0.2–4.0 |
+| `keys` | 动作名 | 按键绑定，值可写多个键（逗号 / 竖线分隔），`off` / `none` 解绑；键名用 GDK 名字，支持 `ctrl+` / `alt+` / `shift+` / `super+` |
 | `audioN` | `link` | **必填**，空的组会被跳过 |
 | | `title` / `artist` / `note` / `pic` / `lrc` / `lrc_offset` / `page` / `platform` | 同上 |
 
@@ -185,7 +225,7 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 页面链接同样
 
 ```
 src/core/    播放器内核：配置、解码与输出、音源解析、歌词、封面取色、收听统计
-src/ui/      画面：版面计算、cairo 绘制、动态背景、二维码、快捷键页
+src/ui/      画面：版面计算、cairo 绘制、动态背景 / 粒子、歌曲墙、二维码、快捷键页
 src/icons/   品牌字标 + 本项目 logo
 src/style/   GTK 外壳样式（窗口底色 + 极细的标题栏）
 src/assets/  示例音频与封面（不入库，按 config.ini 放自己的文件）
@@ -198,7 +238,9 @@ src/models/  内置的 miniaudio.h
 - [x] 封面、歌词（本地 + 在线）、二维码、平台徽标
 - [x] 循环 / 随机 / 自动续播、收听统计与热力图
 - [ ] 更多音源解析（SoundCloud）
-- [ ] 播放列表页（带撤销 / 重做）
+- [x] 全屏歌曲墙（Folia block 思路 + Metro 动态磁贴，键盘 / 鼠标）
+- [x] 音频粒子背景（dust / warp / flow）
+- [x] 按键绑定写进 ini
 - [ ] 退出时把窗口尺寸写回 `config.ini`
 
 ## License

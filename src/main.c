@@ -30,19 +30,34 @@
 #include <gtk/gtk.h>
 
 #include "backdrop.h"
+#include "cache.h"
 #include "config.h"
 #include "cover.h"
 #include "http.h"
+#include "keymap.h"
 #include "lyricview.h"
 #include "media.h"
 #include "player.h"
+#include "playlist.h"
 #include "qrcard.h"
 #include "stage.h"
 #include "stats.h"
 #include "ui.h"
+#include "viz.h"
 
-#define CSS_PATH    "src/style/style.css"
+#ifndef FOLLOW_APP_ID
+#define FOLLOW_APP_ID "org.github.clevebitr.follow"
+#endif
+#ifndef FOLLOW_APP_FLAGS
+#define FOLLOW_APP_FLAGS G_APPLICATION_DEFAULT_FLAGS
+#endif
+
+#ifndef CSS_PATH
+#define CSS_PATH "src/style/style.css"
+#endif
+#ifndef CONFIG_PATH
 #define CONFIG_PATH "src/config.ini"
+#endif
 #define TICK_MS     100
 
 App app;
@@ -93,7 +108,8 @@ static gboolean on_anim_tick(gpointer data)
     if (app.canvas != NULL)
         gtk_widget_queue_draw(app.canvas);
 
-    busy = fx_running(&app.fx_stage) || fx_running(&app.fx_bg);
+    busy = fx_running(&app.fx_stage) || fx_running(&app.fx_bg) ||
+           playlist_animating();
 
     if (!busy) {
         app.anim_id = 0;
@@ -187,71 +203,216 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)keycode;
     (void)data;
 
+    /* 快捷键页：只认帮助 / 返回 / 退出，其他键一律吞掉 */
     if (app.help) {
-        if (keyval == GDK_KEY_F1 || keyval == GDK_KEY_Escape) {
+        if (keymap_match(KEY_HELP, keyval, state) ||
+            keymap_match(KEY_BACK, keyval, state)) {
             app.help = FALSE;
             ui_request_redraw();
-        } else if (keyval == GDK_KEY_q || keyval == GDK_KEY_Q) {
+        } else if (keymap_match(KEY_QUIT, keyval, state)) {
             gtk_window_close(GTK_WINDOW(app.window));
+        } else if (keymap_match(KEY_PLAYLIST, keyval, state)) {
+            app.help = FALSE;
+            playlist_open_page();
         }
 
         return TRUE;
     }
 
-    switch (keyval) {
-    case GDK_KEY_space:
+    /* 播放列表页：方向键选磁贴、回车播放、Tab / Esc 关闭 */
+    if (playlist_is_open()) {
+        if (keymap_match(KEY_PLAYLIST, keyval, state) ||
+            keymap_match(KEY_BACK, keyval, state)) {
+            playlist_close();
+            return TRUE;
+        }
+
+        if (keymap_match(KEY_HELP, keyval, state)) {
+            playlist_close();
+            app.help = TRUE;
+            ui_request_redraw();
+            return TRUE;
+        }
+
+        if (keymap_match(KEY_QUIT, keyval, state)) {
+            gtk_window_close(GTK_WINDOW(app.window));
+            return TRUE;
+        }
+
+        switch (keyval) {
+        case GDK_KEY_Left:
+            playlist_move(-1, 0);
+            return TRUE;
+        case GDK_KEY_Right:
+            playlist_move(+1, 0);
+            return TRUE;
+        case GDK_KEY_Up:
+            playlist_move(0, -1);
+            return TRUE;
+        case GDK_KEY_Down:
+            playlist_move(0, +1);
+            return TRUE;
+        case GDK_KEY_Page_Up:
+            playlist_page(-1);
+            return TRUE;
+        case GDK_KEY_Page_Down:
+            playlist_page(+1);
+            return TRUE;
+        case GDK_KEY_Home:
+            playlist_home();
+            return TRUE;
+        case GDK_KEY_End:
+            playlist_end();
+            return TRUE;
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter:
+            playlist_activate();
+            return TRUE;
+        default:
+            break;
+        }
+
+        if (keymap_match(KEY_PLAY_PAUSE, keyval, state)) {
+            playlist_activate();
+            return TRUE;
+        }
+
+        return TRUE;
+    }
+
+    if (keymap_match(KEY_PLAY_PAUSE, keyval, state)) {
         player_toggle();
         return TRUE;
-    case GDK_KEY_Left:
+    }
+    if (keymap_match(KEY_SEEK_BACK, keyval, state)) {
         player_seek_by(-seek);
         return TRUE;
-    case GDK_KEY_Right:
+    }
+    if (keymap_match(KEY_SEEK_FORWARD, keyval, state)) {
         player_seek_by(+seek);
         return TRUE;
-    case GDK_KEY_n: case GDK_KEY_N:
+    }
+    if (keymap_match(KEY_NEXT, keyval, state)) {
         player_play_neighbour(+1);
         return TRUE;
-    case GDK_KEY_p: case GDK_KEY_P:
+    }
+    if (keymap_match(KEY_PREV, keyval, state)) {
         player_play_neighbour(-1);
         return TRUE;
-    case GDK_KEY_r: case GDK_KEY_R:
+    }
+    if (keymap_match(KEY_RESTART, keyval, state)) {
         player_restart();
         return TRUE;
-    case GDK_KEY_s: case GDK_KEY_S:
+    }
+    if (keymap_match(KEY_STOP, keyval, state)) {
         player_stop();
         return TRUE;
-    case GDK_KEY_bracketleft:            /* +250ms */
+    }
+    if (keymap_match(KEY_LYRIC_EARLIER, keyval, state)) {
         lyricview_shift_offset(-250);
         return TRUE;
-    case GDK_KEY_bracketright:           /* -250ms */
+    }
+    if (keymap_match(KEY_LYRIC_LATER, keyval, state)) {
         lyricview_shift_offset(+250);
         return TRUE;
-    case GDK_KEY_backslash:              /* reset config */
+    }
+    if (keymap_match(KEY_LYRIC_RESET, keyval, state)) {
         lyricview_reset_offset();
         return TRUE;
-    case GDK_KEY_l: case GDK_KEY_L:
+    }
+    if (keymap_match(KEY_REPEAT, keyval, state)) {
         player_cycle_repeat();
         return TRUE;
-    case GDK_KEY_h: case GDK_KEY_H:
+    }
+    if (keymap_match(KEY_SHUFFLE, keyval, state)) {
         player_toggle_shuffle();
         return TRUE;
-    case GDK_KEY_f: case GDK_KEY_F: case GDK_KEY_F11:
+    }
+    if (keymap_match(KEY_FULLSCREEN, keyval, state)) {
         toggle_fullscreen();
         return TRUE;
-    case GDK_KEY_F1:
+    }
+    if (keymap_match(KEY_PLAYLIST, keyval, state)) {
+        playlist_open_page();
+        return TRUE;
+    }
+    if (keymap_match(KEY_HELP, keyval, state)) {
         app.help = TRUE;
         ui_request_redraw();
         return TRUE;
-    case GDK_KEY_Escape:
+    }
+    if (keymap_match(KEY_QUIT, keyval, state)) {
+        gtk_window_close(GTK_WINDOW(app.window));
+        return TRUE;
+    }
+    if (keymap_match(KEY_BACK, keyval, state)) {
         if (gtk_window_is_fullscreen(GTK_WINDOW(app.window)))
             gtk_window_unfullscreen(GTK_WINDOW(app.window));
         return TRUE;
-    case GDK_KEY_q: case GDK_KEY_Q:
-        gtk_window_close(GTK_WINDOW(app.window));
-        return TRUE;
-    default:
-        return FALSE;
     }
+
+    return FALSE;
+}
+
+/* 鼠标：歌曲墙的拖动 / 滚轮 / 悬停 / 点击 */
+static void on_canvas_released(GtkGestureClick *gesture, int n_press,
+                               double x, double y, gpointer data)
+{
+    (void)gesture;
+    (void)n_press;
+    (void)data;
+
+    if (!playlist_was_dragging())
+        playlist_click(x, y);
+}
+
+static void on_canvas_drag_begin(GtkGestureDrag *gesture, double start_x,
+                                  double start_y, gpointer data)
+{
+    (void)gesture;
+    (void)data;
+
+    playlist_pan_begin(start_x, start_y);
+}
+
+static void on_canvas_drag_update(GtkGestureDrag *gesture, double offset_x,
+                                   double offset_y, gpointer data)
+{
+    (void)gesture;
+    (void)data;
+
+    playlist_pan_update(offset_x, offset_y);
+}
+
+static void on_canvas_drag_end(GtkGestureDrag *gesture, double offset_x,
+                                double offset_y, gpointer data)
+{
+    (void)gesture;
+    (void)data;
+
+    playlist_pan_end(offset_x, offset_y);
+}
+
+static void on_canvas_motion(GtkEventControllerMotion *controller,
+                             double x, double y, gpointer data)
+{
+    (void)controller;
+    (void)data;
+
+    playlist_hover(x, y);
+}
+
+static gboolean on_canvas_scroll(GtkEventControllerScroll *controller,
+                                 double dx, double dy, gpointer data)
+{
+    (void)controller;
+    (void)data;
+
+    if (!playlist_is_open())
+        return FALSE;
+
+    playlist_pan_by(dx, dy);
+    return TRUE;
 }
 
 
@@ -301,6 +462,29 @@ static void activate(GtkApplication *app_, gpointer user_data)
     g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key_pressed), NULL);
     gtk_widget_add_controller(window, keys);
 
+    {
+        GtkGesture         *click  = gtk_gesture_click_new();
+        GtkGesture         *drag   = gtk_gesture_drag_new();
+        GtkEventController *motion = gtk_event_controller_motion_new();
+        GtkEventController *scroll = gtk_event_controller_scroll_new(
+            GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
+
+        g_signal_connect(click, "released", G_CALLBACK(on_canvas_released), NULL);
+        g_signal_connect(drag, "drag-begin", G_CALLBACK(on_canvas_drag_begin), NULL);
+        g_signal_connect(drag, "drag-update", G_CALLBACK(on_canvas_drag_update), NULL);
+        g_signal_connect(drag, "drag-end", G_CALLBACK(on_canvas_drag_end), NULL);
+        g_signal_connect(motion, "motion", G_CALLBACK(on_canvas_motion), NULL);
+        g_signal_connect(scroll, "scroll", G_CALLBACK(on_canvas_scroll), NULL);
+
+        gtk_widget_add_controller(app.canvas, GTK_EVENT_CONTROLLER(click));
+        gtk_widget_add_controller(app.canvas, GTK_EVENT_CONTROLLER(drag));
+        gtk_widget_add_controller(app.canvas, motion);
+        gtk_widget_add_controller(app.canvas, scroll);
+    }
+
     app.track        = -1;
     app.shown_second = -1;
     app.repeat       = cfg->repeat;
@@ -339,8 +523,10 @@ static void startup(GtkApplication *app_, gpointer user_data)
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
 
+#ifndef FOLLOW_SKIP_AUDIO
     if (media_init(&app.media) != 0)
         g_warning("media engine init failed");
+#endif
 
     if (!g_file_test(CONFIG_PATH, G_FILE_TEST_EXISTS)) {
         g_warning("config file is not found in: %s (using defaults)", CONFIG_PATH);
@@ -349,6 +535,21 @@ static void startup(GtkApplication *app_, gpointer user_data)
     }
 
     config_load(CONFIG_PATH);
+
+    cache_prune_prefix("cover", config_cover_max_bytes());
+
+    g_message("cache: cover %.1f MB / limit %.0f MB",
+              (double)cache_prefix_bytes("cover") / 1048576.0,
+              (double)config_cover_max_bytes() / 1048576.0);
+
+    keymap_init();
+    viz_configure(config_viz_effect(), config_viz_particles(), config_viz_gain());
+
+    g_message("visualizer: %s, %d particle(s), gain %.2f",
+              viz_effect_name(), config_viz_particles(), config_viz_gain());
+    g_message("keys: play=%s  next=%s  playlist=%s  help=%s",
+              keymap_label(KEY_PLAY_PAUSE), keymap_label(KEY_NEXT),
+              keymap_label(KEY_PLAYLIST), keymap_label(KEY_HELP));
 
     /* [net] proxy 同时也交给 FFmpeg：curl 走 CURLOPT_PROXY，
      * 解码器（avformat 的 http）只认环境变量，两边都指到同一个代理。 */
@@ -414,6 +615,8 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     cover_clear();
     backdrop_drop();
     qrcard_clear();
+    playlist_clear();
+    keymap_clear();
     config_free();
 
     http_global_cleanup();
@@ -428,7 +631,7 @@ int main(int argc, char **argv)
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
-    app_ = gtk_application_new("org.github.clevebitr.follow", G_APPLICATION_DEFAULT_FLAGS);
+    app_ = gtk_application_new(FOLLOW_APP_ID, FOLLOW_APP_FLAGS);
     if (app_ == NULL)
         return 1;
 

@@ -27,6 +27,10 @@ void cover_clear(void);
 /* 原图（长边 <= 768），动态背景要用；没有封面返回 NULL */
 cairo_surface_t *cover_base(void);
 
+/* 把图床 URL 规整成可下载的方形 JPEG（B 站 @... 后缀 / .avif）。
+ * 播放列表的封面缓存也用这个规则，返回新分配的字符串。 */
+gchar *cover_url_normalize(const char *url);
+
 /* 在 (x, y, size, size) 的方框里居中画封面；没有封面就画一个占位框 */
 void cover_draw(cairo_t *cr, double x, double y, double size);
 

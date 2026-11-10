@@ -11,6 +11,7 @@
 
 #include "help.h"
 
+#include "keymap.h"
 #include "theme.h"
 
 #define ROWS_PER_PANEL 2.2      /* 标题 + 底部留白占的行数 */
@@ -18,25 +19,29 @@
 void help_draw(cairo_t *cr, double width, double height)
 {
     static const struct {
-        const char *key;
+        KeyAction   action;
         const char *desc;
     } rows[] = {
-        { "SPACE",   "播放 / 暂停" },
-        { "←  →",    "后退 / 前进 5 秒（按住 Shift = 30 秒）" },
-        { "N / P",   "下一首 / 上一首" },
-        { "R",       "从头重放当前曲目" },
-        { "S",       "停止" },
-        { "L",       "循环：关 → 列表 → 单曲" },
-        { "H",       "随机播放开关" },
-        { "[ / ]",   "歌词整体提前 / 延后 250 ms（视频带片头时用）" },
-        { "\\",      "歌词偏移恢复成 ini 里的值" },
-        { "F / F11", "全屏切换" },
-        { "F1",      "打开 / 关闭这一页" },
-        { "Q",       "退出" },
-        { "ESC",     "关闭这一页 / 退出全屏" },
+        { KEY_PLAY_PAUSE,   "播放 / 暂停（还没放歌时从第一首开始）" },
+        { KEY_SEEK_BACK,    "后退 5 秒（按住 Shift = 30 秒）" },
+        { KEY_SEEK_FORWARD, "前进 5 秒（按住 Shift = 30 秒）" },
+        { KEY_NEXT,         "下一首" },
+        { KEY_PREV,         "上一首" },
+        { KEY_RESTART,      "从头重放当前曲目" },
+        { KEY_STOP,         "停止" },
+        { KEY_REPEAT,       "循环：关 → 列表 → 单曲" },
+        { KEY_SHUFFLE,      "随机播放开关" },
+        { KEY_LYRIC_EARLIER, "歌词整体提前 250 ms（视频带片头时用）" },
+        { KEY_LYRIC_LATER,   "歌词整体延后 250 ms" },
+        { KEY_LYRIC_RESET,   "歌词偏移恢复成 ini 里的值" },
+        { KEY_PLAYLIST,     "打开 / 关闭播放列表" },
+        { KEY_FULLSCREEN,   "全屏切换" },
+        { KEY_HELP,         "打开 / 关闭这一页" },
+        { KEY_BACK,         "关闭这一页 / 退出全屏" },
+        { KEY_QUIT,         "退出" },
     };
     const double n_rows  = (double)G_N_ELEMENTS(rows) + ROWS_PER_PANEL;
-    double       panel_w = clampd(width * 0.50, 360.0, 760.0);
+    double       panel_w = clampd(width * 0.56, 420.0, 900.0);
     double       row_h   = clampd(height * 0.047, 16.0, 34.0);
     double       panel_h = row_h * n_rows;
     double       panel_x, panel_y, key_x, desc_x;
@@ -49,8 +54,8 @@ void help_draw(cairo_t *cr, double width, double height)
 
     panel_x = (width - panel_w) * 0.5;
     panel_y = (height - panel_h) * 0.5;
-    key_x   = panel_x + panel_w * 0.10;
-    desc_x  = panel_x + panel_w * 0.30;
+    key_x   = panel_x + panel_w * 0.07;
+    desc_x  = panel_x + panel_w * 0.34;
 
     /* 压暗整屏 */
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.62);
@@ -77,7 +82,8 @@ void help_draw(cairo_t *cr, double width, double height)
     for (gsize i = 0; i < G_N_ELEMENTS(rows); i++) {
         double y = panel_y + row_h * (1.9 + (double)i);
 
-        text_draw(cr, rows[i].key, &key_style, key_x, y, TEXT_LEFT, 0.0);
+        text_draw(cr, keymap_label(rows[i].action), &key_style, key_x, y,
+                  TEXT_LEFT, desc_x - key_x - 12.0);
         text_draw(cr, rows[i].desc, &desc_style, desc_x, y, TEXT_LEFT,
                   panel_x + panel_w * 0.94 - desc_x);
     }

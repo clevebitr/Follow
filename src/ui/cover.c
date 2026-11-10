@@ -34,7 +34,7 @@ typedef struct {
 } CoverJob;
 
 /* 图床的 @... 后缀改成正方形 JPEG；其它地址的 .avif 换 .jpg */
-static gchar *cover_url_normalize(const char *url)
+gchar *cover_url_normalize(const char *url)
 {
     if (url == NULL)
         return NULL;
@@ -115,6 +115,7 @@ static gboolean cover_done(gpointer data)
                     gconstpointer   data = g_bytes_get_data(job->bytes, &size);
 
                     g_file_set_contents(job->cache_path, data, (gssize)size, NULL);
+                    cache_prune_prefix("cover", config_cover_max_bytes());
                 }
             } else {
                 g_warning("cover: cannot decode %s: %s", job->url,

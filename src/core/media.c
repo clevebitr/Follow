@@ -100,6 +100,25 @@ static void ring_push(Media *m, const float *src, ma_uint32 frames)
     __atomic_store_n(&m->ring_write, w, __ATOMIC_RELEASE);
 }
 
+/* 可视化取样：把刚输出的立体声下混成单声道，写进 scope 环。
+ * 这里只做加法和取模，成本约等于一次 memcpy 的三分之一。 */
+static void scope_push(Media *m, const float *src, ma_uint32 frames)
+{
+    ma_uint64 w;
+
+    if (m->scope == NULL)
+        return;
+
+    w = m->scope_write;
+
+    for (ma_uint32 i = 0; i < frames; i++) {
+        m->scope[(ma_uint32)((w + i) % MEDIA_SCOPE_SAMPLES)] =
+            (src[(gsize)i * MEDIA_CHANNELS] + src[(gsize)i * MEDIA_CHANNELS + 1]) * 0.5f;
+    }
+
+    __atomic_store_n(&m->scope_write, w + frames, __ATOMIC_RELEASE);
+}
+
 /*  音频回调 */
 static void media_data_callback(ma_device *device, void *output, const void *input,
                                 ma_uint32 frame_count)
@@ -141,6 +160,9 @@ static void media_data_callback(ma_device *device, void *output, const void *inp
 
     __atomic_store_n(&m->ring_read, r + take, __ATOMIC_RELEASE);
     __atomic_fetch_add(&m->cursor, take, __ATOMIC_RELEASE);
+
+    /* 可视化要的是“刚刚听到的声音”，所以推的是已经写进输出缓冲的样本 */
+    scope_push(m, out, frame_count);
 
     /* 缓冲抽干了而且解码线程已经到了文件尾 → 这首放完了 */
     if (take == 0 && __atomic_load_n(&m->eof, __ATOMIC_ACQUIRE) &&
@@ -587,7 +609,8 @@ int media_init(Media *m)
         m->sample_rate = MEDIA_FALLBACK_RATE;
 
     m->ring_frames = m->sample_rate * MEDIA_BUFFER_SECONDS;
-    m->ring = g_new0(float, (gsize)m->ring_frames * MEDIA_CHANNELS);
+    m->ring  = g_new0(float, (gsize)m->ring_frames * MEDIA_CHANNELS);
+    m->scope = g_new0(float, MEDIA_SCOPE_SAMPLES);
 
     m->cmd_seek = -1;
     g_mutex_init(&m->cmd_lock);
@@ -599,7 +622,9 @@ int media_init(Media *m)
         ma_device_uninit(&m->device);
         g_mutex_clear(&m->cmd_lock);
         g_free(m->ring);
-        m->ring = NULL;
+        g_free(m->scope);
+        m->ring  = NULL;
+        m->scope = NULL;
         return -3;
     }
 
@@ -754,6 +779,26 @@ const char *media_error(Media *m)
     return m->error;
 }
 
+int media_read_scope(Media *m, float *dst, int n)
+{
+    ma_uint64 w;
+    int       got;
+
+    if (m == NULL || m->scope == NULL || dst == NULL || n <= 0)
+        return 0;
+
+    memset(dst, 0, (gsize)n * sizeof(float));
+
+    w   = __atomic_load_n(&m->scope_write, __ATOMIC_ACQUIRE);
+    got = (int)MIN((ma_uint64)n, MIN(w, (ma_uint64)MEDIA_SCOPE_SAMPLES));
+
+    for (int i = 0; i < got; i++)
+        dst[n - got + i] = m->scope[(ma_uint32)((w - (ma_uint64)got + (ma_uint64)i)
+                                              % MEDIA_SCOPE_SAMPLES)];
+
+    return got;
+}
+
 void media_clear(Media *m)
 {
     if (m == NULL || !m->ready)
@@ -770,6 +815,8 @@ void media_clear(Media *m)
     g_free(m->cmd_headers);
     g_free(m->ring);
     m->ring = NULL;
+    g_free(m->scope);
+    m->scope = NULL;
 
     m->ready = 0;
 

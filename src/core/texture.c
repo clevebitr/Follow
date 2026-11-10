@@ -112,7 +112,15 @@ static void box_blur_pass(guchar *data, int w, int h, int stride, int radius, in
             int     a[4] = { 0, 0, 0, 0 };
             int     count = 0;
 
-            memcpy(copy, row, (size_t)len * 4);
+            if (dir == 0) {
+                memcpy(copy, row, (size_t)len * 4);
+            } else {
+                /* 纵向：按 stride 把一列像素收集到连续内存里。
+                 * 原来这里直接 memcpy，纵向 pass 读的其实是第一行的数据，
+                 * 会在整屏拉出斜向条纹。 */
+                for (int i = 0; i < len; i++)
+                    memcpy(copy + (size_t)i * 4, row + (size_t)i * stride, 4);
+            }
 
             /* 滑动窗口：先把左边 radius 个样本加进来 */
             for (int i = 0; i <= radius && i < len; i++) {
