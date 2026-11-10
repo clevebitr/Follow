@@ -33,7 +33,16 @@ void     playlist_home(void);
 void     playlist_end(void);
 gboolean playlist_activate(void);
 
-void     playlist_draw(cairo_t *cr, double w, double h);
+void     playlist_draw(cairo_t *cr, double w, double h);                 /* cairo 回退：整页 */
+void     playlist_build_frame(double w, double h);                       /* GL 层：推一帧磁贴 */
+void     playlist_draw_chrome(cairo_t *cr, double w, double h);          /* GL 层：表头 / 底栏 / 空列表 */
+
+/* 给 GL 纹理用的 cairo 缓存；surface 由 playlist 持有，调用方不要 destroy。
+ * overlay 四周比磁贴多 4px（选中描边的外圈）。 */
+cairo_surface_t *playlist_tile_surface(gsize track, int w, int h);
+cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
+                                       gboolean selected, gboolean hovered,
+                                       gboolean current);
 
 /* 鼠标：拖动 / 滚轮 / 悬停 / 点击 */
 void     playlist_pan_begin(double x, double y);

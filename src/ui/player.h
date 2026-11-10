@@ -36,6 +36,9 @@ void player_toggle_shuffle(void);/* H */
 /* 定时器里调：一首放完就按当前模式续播 */
 void player_check_finished(void);
 
+/* 定时器里调：缓存直链失效时失效缓存并重解析一次 */
+void player_check_load_failure(void);
+
 /* 显示用的「艺人 - 曲名」（ini > 网络解析 > 文件名），新分配的字符串 */
 gchar *player_label(void);
 

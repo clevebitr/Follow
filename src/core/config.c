@@ -479,6 +479,15 @@ const APPconfig *config_load(const char *path)
 
         g_free(g_config.cache_dir);
         g_config.cache_dir = (dir != NULL && *dir != '\0') ? g_steal_pointer(&dir) : NULL;
+
+        g_config.resolve_ttl  = config_get_int(kf, "cache", "resolve_ttl",
+                                               g_config.resolve_ttl);
+        g_config.audio_cache  = config_get_bool(kf, "cache", "audio",
+                                                g_config.audio_cache);
+        g_config.audio_max_mb = config_get_int(kf, "cache", "audio_max_mb",
+                                               g_config.audio_max_mb);
+        g_config.cover_max_mb = config_get_int(kf, "cache", "cover_max_mb",
+                                               g_config.cover_max_mb);
     }
 
     /* [net]：UA 和两个超时；没写就用内置默认 */

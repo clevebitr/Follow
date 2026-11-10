@@ -40,10 +40,14 @@
 
 ### 歌曲墙
 
-- `Tab` 打开全屏歌曲墙：block 思路参考 Folia 的 `12 × 8` poster wall，用我们自己的槽位变体做 Windows 动态磁贴式混排（6×4 / 4×4 / 3×2 / 2×2 …）
+- `Tab` 打开全屏歌曲墙：`12 × 8` block 模板向四周无限重复，每个新 block 随机换模板 / 翻转 / 打乱曲序，拖到哪都有内容（布局思路参考 Folia，槽位和实现是自己的变体）
+- 鼠标左键自由拖动（松手带惯性），滚轮 / 触摸板双指平移；拖完自动把焦点落到视野内最近的磁贴
+- 墙层走 `GtkGLArea`：cairo 只负责把每首歌按尺寸预渲染成纹理，平移 / 选中弹出 / 压暗 / 淡入由 GPU 合成；驱动不支持 OpenGL 3.3 时自动退回整屏 cairo，也可以用 `FOLLOW_WALLGL=0` 强制回退
+- 整屏置色：底色 + 两团来自选中封面的径向柔光（Folia 的做法），顶栏 / 底栏都是同色相的实心色衬；focus 封面还没加载完时保持上一色，不会闪黑
 - 封面磁贴：大封面 + 底部渐变标题 / 艺人、右上角平台角标；当前曲目左侧强调条 + `♪`，选中的磁贴是白色描边
 - `← ↑ ↓ →` 空间导航，`PageUp` / `PageDown` 翻一屏，`Home` / `End` 首尾，`Enter` 或 `Space` 播放并返回
-- 鼠标悬停高亮，单击磁贴立即播放并返回；滚轮上下滚动；不满一个 block 的空位用低对比度 `FOLLOW` 装饰磁贴补齐
+- 进场 / 退场、磁贴弹出、封面淡入都能用 `[ui] animations = false` 整体关掉（低配机器）
+- 不满一个 block 的空位用低对比度 `FOLLOW` 装饰磁贴补齐
 - 开关键、关闭键以及所有播放快捷键都能在 `[keys]` 里改
 
 ### 二维码
@@ -82,16 +86,17 @@
 
 ## 开始使用
 
-需要 GTK 4、FFmpeg、libcurl、JSON-GLib、libqrencode、librsvg，以及一个 C 编译器。
+需要 GTK 4、libepoxy、FFmpeg、libcurl、JSON-GLib、libqrencode、librsvg，以及一个 C 编译器。
 
 ```sh
 # MSYS2 / MinGW-w64
 pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-gtk4 \
-          mingw-w64-x86_64-libqrencode mingw-w64-x86_64-curl
+          mingw-w64-x86_64-libepoxy mingw-w64-x86_64-libqrencode \
+          mingw-w64-x86_64-curl
 
 # Debian / Ubuntu
-sudo apt install build-essential pkg-config libgtk-4-dev libqrencode-dev \
-     libcurl4-openssl-dev libjson-glib-dev librsvg2-dev \
+sudo apt install build-essential pkg-config libgtk-4-dev libepoxy-dev \
+     libqrencode-dev libcurl4-openssl-dev libjson-glib-dev librsvg2-dev \
      libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
 ```
 
@@ -116,6 +121,11 @@ link=https://live.bilibili.com/1840990819
 
 [cache]
 #dir=cache                        # 缓存目录，默认 <用户缓存>/follow；支持 ~ 和相对路径
+#resolve_ttl=2700                 # B 站 / YouTube 解析缓存时长（秒），0 = 关闭
+#cover_max_mb=128                 # 封面缓存上限（MB），超出按最近使用清理
+
+[ui]
+animations=true                   # 动效总开关：进场 / 退场 / 磁贴弹出 / 封面淡入
 
 [net]
 #user_agent=Mozilla/5.0 ...       # 留空就用内置的浏览器 UA
@@ -181,8 +191,9 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 页面链接同样
 
 | C + GLib | 全部代码 |
 |---|---|
-| GTK 4 | 窗口、GtkPicture 纹理放大、CSS |
-| cairo + Pango | 整屏绘制与排版 |
+| GTK 4 | 窗口、GtkPicture 纹理放大、CSS、GtkGLArea 歌曲墙 |
+| cairo + Pango | 整屏绘制与排版；歌曲墙磁贴预渲染成纹理 |
+| OpenGL 3.3 + libepoxy | 墙层 textured quad、相机平移 / 选中缩放 / 压暗在 GPU 上合成 |
 | miniaudio | 音频输出设备（已内置，header-only） |
 | FFmpeg | 本地 / 网络音频解码 |
 | libcurl + JSON-GLib | 网络请求与接口解析（B 站 / YouTube / 歌词源）、YouTube 分块拉流 |
@@ -214,7 +225,8 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 页面链接同样
 | `note` | `text` | 时钟上面那行副标题；空则这一行让给歌词 |
 | `playback` | `repeat` / `shuffle` | `off`/`all`（默认）/`one`，随机默认关 |
 | `qrcode` | `link` / `label` | 只对 `http(s)` 地址显示；`label` 默认取主机名 |
-| `cache` | `dir` | 歌词 / 封面 / B 站元数据 / 收听统计的落地目录，默认 `<用户缓存>/follow` |
+| `cache` | `dir` / `resolve_ttl` / `cover_max_mb` | 缓存目录（默认 `<用户缓存>/follow`）；解析结果缓存时长（秒，默认 2700，0 = 关闭）；封面缓存上限（MB，默认 128） |
+| `ui` | `animations` | 动效总开关，`false` 关闭页面滑入 / 滑出、磁贴弹出、封面淡入、背景主色过渡 |
 | `net` | `user_agent` / `timeout` / `connect_timeout` / `proxy` | 网络默认值；UA 留空用内置浏览器 UA，超时单位秒，`proxy` 同时作用于 curl 与 FFmpeg |
 | `visualizer` | `effect` / `particles` / `gain` | 音频粒子背景：`off` / `dust`（默认）/ `warp` / `flow`，粒子数 20–400，灵敏度 0.2–4.0 |
 | `keys` | 动作名 | 按键绑定，值可写多个键（逗号 / 竖线分隔），`off` / `none` 解绑；键名用 GDK 名字，支持 `ctrl+` / `alt+` / `shift+` / `super+` |
@@ -238,7 +250,8 @@ src/models/  内置的 miniaudio.h
 - [x] 封面、歌词（本地 + 在线）、二维码、平台徽标
 - [x] 循环 / 随机 / 自动续播、收听统计与热力图
 - [ ] 更多音源解析（SoundCloud）
-- [x] 全屏歌曲墙（Folia block 思路 + Metro 动态磁贴，键盘 / 鼠标）
+- [x] 全屏歌曲墙（无限 block + 自由拖动 / 惯性 / 滚轮，键盘 / 鼠标）
+- [x] 解析结果缓存（B 站 / YouTube，TTL + 直链失效自动重解析一次）
 - [x] 音频粒子背景（dust / warp / flow）
 - [x] 按键绑定写进 ini
 - [ ] 退出时把窗口尺寸写回 `config.ini`

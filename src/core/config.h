@@ -146,10 +146,11 @@ double       config_viz_gain(void);
 /* [keys] 原始绑定字符串；没写返回 NULL（keymap 用默认值） */
 const gchar *config_key_binding(KeyAction action);
 
-/* [cache] 解析结果 TTL（秒，0 = 关闭）；音频 / 封面缓存上限（字节） */
+/* [cache] 解析结果 TTL（秒，0 = 关闭）；音频 / 封面缓存上限（字节）。
+ * audio 相关访问器是预留接口，当前还没有音频落盘实现。 */
 gint    config_resolve_ttl(void);
-gboolean config_audio_cache(void);
-guint64 config_audio_max_bytes(void);
+gboolean config_audio_cache(void);      /* 预留 */
+guint64 config_audio_max_bytes(void);   /* 预留 */
 guint64 config_cover_max_bytes(void);
 
 /* [ui] 动效总开关 */

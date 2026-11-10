@@ -14,6 +14,7 @@
 #include "bilibili.h"
 #include "config.h"
 #include "platform.h"
+#include "resolvecache.h"
 #include "source.h"
 #include "youtube.h"
 
@@ -22,12 +23,13 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
     if (out == NULL)
         return -1;
 
-    out->url      = NULL;
-    out->headers  = NULL;
-    out->title    = NULL;
-    out->artist   = NULL;
-    out->resolved = FALSE;
-    out->ranged   = FALSE;
+    out->url        = NULL;
+    out->headers    = NULL;
+    out->title      = NULL;
+    out->artist     = NULL;
+    out->resolved   = FALSE;
+    out->from_cache = FALSE;
+    out->ranged     = FALSE;
 
     if (error != NULL)
         *error = NULL;
@@ -42,6 +44,10 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
         out->url = g_strdup(uri);
         return 0;
     }
+
+    /* 页面链接：先看解析缓存，命中就不打 API（直链过期由 player 负责失效重试） */
+    if (resolvecache_load(uri, out))
+        return 0;
 
     if (platform_from_url(uri) == PLATFORM_YOUTUBE) {
         gchar *audio_url = NULL;
@@ -70,6 +76,7 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
         out->resolved = TRUE;
         out->ranged   = TRUE;   /* googlevideo 只认定长 Range 请求 */
 
+        resolvecache_save(uri, out);
         g_message("source: youtube -> %s (%s)", title != NULL ? title : "?", audio_url);
         return 0;
     }
@@ -100,6 +107,7 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
         out->artist   = artist;
         out->resolved = TRUE;
 
+        resolvecache_save(uri, out);
         g_message("source: bilibili -> %s (%s)", title != NULL ? title : "?", audio_url);
         return 0;
     }
@@ -107,6 +115,11 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
     /* 其它 http(s) 直链：原样交给解码器 */
     out->url = g_strdup(uri);
     return 0;
+}
+
+void source_cache_invalidate(const char *uri)
+{
+    resolvecache_invalidate(uri);
 }
 
 void source_clear(MediaSource *s)

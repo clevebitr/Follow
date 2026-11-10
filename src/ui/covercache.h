@@ -25,7 +25,6 @@ void             covercache_sync(void);                 /* 曲目数变化时重
 cairo_surface_t *covercache_surface(gsize index);       /* 没加载完返回 NULL，同时会启动加载 */
 const Palette   *covercache_palette(gsize index);       /* 还没取到颜色返回 NULL */
 double           covercache_reveal(gsize index);        /* 加载后的淡入进度 0..1 */
-cairo_surface_t *covercache_scaled(gsize index, int px);/* 按磁贴尺寸缓存的缩放图 */
 gboolean         covercache_animating(void);            /* 还有封面在淡入 */
 gint64           covercache_version(gsize index);          /* 封面加载时间戳，用作磁贴缓存版本 */
 void             covercache_clear(void);                /* 退出时释放 */

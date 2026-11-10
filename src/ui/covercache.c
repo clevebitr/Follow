@@ -26,8 +26,6 @@
 
 typedef struct {
     cairo_surface_t *surface;
-    cairo_surface_t *scaled;
-    int              scaled_px;
     gint64           ready_us;
     Palette          palette;
     gboolean         has_palette;
@@ -52,8 +50,6 @@ static guint       g_cover_gen = 0;
 static void entry_clear(CoverEntry *e)
 {
     g_clear_pointer(&e->surface, cairo_surface_destroy);
-    g_clear_pointer(&e->scaled, cairo_surface_destroy);
-    e->scaled_px = 0;
     e->ready_us  = 0;
     palette_reset(&e->palette);
     e->has_palette = FALSE;
@@ -311,62 +307,6 @@ double covercache_reveal(gsize index)
     t   = CLAMP(age / 0.32, 0.0, 1.0);
 
     return 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
-}
-
-cairo_surface_t *covercache_scaled(gsize index, int px)
-{
-    CoverEntry      *entry;
-    cairo_surface_t *surface;
-    cairo_t         *cr;
-    double           sw, sh, scale, dw, dh;
-
-    if (index >= g_count || g_entries == NULL)
-        return NULL;
-
-    entry = &g_entries[index];
-
-    if (entry->surface == NULL)
-        return NULL;
-
-    px = MAX(16, (px + 7) & ~7);
-
-    if (entry->scaled != NULL && entry->scaled_px == px)
-        return entry->scaled;
-
-    g_clear_pointer(&entry->scaled, cairo_surface_destroy);
-
-    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
-    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surface);
-        return NULL;
-    }
-
-    sw = (double)cairo_image_surface_get_width(entry->surface);
-    sh = (double)cairo_image_surface_get_height(entry->surface);
-
-    if (sw <= 0.0 || sh <= 0.0) {
-        cairo_surface_destroy(surface);
-        return NULL;
-    }
-
-    scale = MAX((double)px / sw, (double)px / sh);
-    dw    = sw * scale;
-    dh    = sh * scale;
-
-    cr = cairo_create(surface);
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
-    cairo_paint(cr);
-    cairo_translate(cr, ((double)px - dw) * 0.5, ((double)px - dh) * 0.5);
-    cairo_scale(cr, scale, scale);
-    cairo_set_source_surface(cr, entry->surface, 0.0, 0.0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
-    cairo_paint(cr);
-    cairo_destroy(cr);
-
-    entry->scaled    = surface;
-    entry->scaled_px = px;
-
-    return entry->scaled;
 }
 
 gint64 covercache_version(gsize index)

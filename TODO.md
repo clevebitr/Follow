@@ -2,46 +2,48 @@
 
 ## P0 — 本轮收尾
 
-- [ ] 把 `src/core/resolvecache.c` 接进 `src/core/source.c`
-  - [ ] B 站 / YouTube 解析前先 `resolvecache_load()`
-  - [ ] 解析成功后 `resolvecache_save()`
-  - [ ] 实现 `source_cache_invalidate()`
-  - [ ] 播放缓存直链失败时，`player.c` 失效缓存并自动重解析一次（只重试一次）
-- [ ] 配置解析补完
-  - [ ] `[cache] resolve_ttl`（默认 2700 秒，0 = 关闭）
-  - [ ] `[cache] cover_max_mb`（默认 128，已用 `cache_prune_prefix()` 清理）
-  - [ ] `[ui] animations`（已解析/使用）
-  - [ ] 把 `[cache]` / `[ui]` 写进 `src/config.ini` 注释
-- [ ] 退出时清理 `resolvecache` 过期文件（`resolvecache_prune()` 接到启动）
-- [ ] 删除无用代码
-  - [ ] `covercache_scaled()` 和 `CoverEntry.scaled/scaled_px`（已不再使用）
-  - [ ] `config_audio_cache()` / `config_audio_max_bytes()` 暂未使用，先保留或标记“预留”
-- [ ] 重新链接 `main.exe`（当前磁盘上的还是旧磁贴墙版本）
-- [ ] 更新 README
-  - [ ] 无限墙 / 自由拖动 / 滚轮 / 随机布局
-  - [ ] 进出场、选中磁贴、封面淡入、`[ui] animations`
-  - [ ] 解析缓存 TTL、封面缓存上限
-- [ ] 清理测试产物
-  - [ ] `build/follow-wall.exe`、`build/tmp/*` 测试脚本/截图
-  - [ ] 检查 `git diff --check`
+- [x] 把 `src/core/resolvecache.c` 接进 `src/core/source.c`
+  - [x] B 站 / YouTube 解析前先 `resolvecache_load()`
+  - [x] 解析成功后 `resolvecache_save()`
+  - [x] 实现 `source_cache_invalidate()`
+  - [x] 播放缓存直链失败时，`player.c` 失效缓存并自动重解析一次（只重试一次）
+- [x] 配置解析补完
+  - [x] `[cache] resolve_ttl`（默认 2700 秒，0 = 关闭）
+  - [x] `[cache] cover_max_mb`（默认 128，已用 `cache_prune_prefix()` 清理）
+  - [x] `[ui] animations`（已解析/使用）
+  - [x] 把 `[cache]` / `[ui]` 写进 `src/config.ini` 注释
+- [x] 启动时清理 `resolvecache` 过期文件（`resolvecache_prune()` 已接到启动）
+- [x] 删除无用代码
+  - [x] `covercache_scaled()` 和 `CoverEntry.scaled/scaled_px`（已不再使用）
+  - [x] `config_audio_cache()` / `config_audio_max_bytes()` 暂未使用，保留并标记“预留”
+- [x] 重新链接 `main.exe`
+- [x] 更新 README
+  - [x] 无限墙 / 自由拖动 / 滚轮 / 随机布局
+  - [x] 进出场、选中磁贴、封面淡入、`[ui] animations`
+  - [x] 解析缓存 TTL、封面缓存上限
+- [x] 清理测试产物
+  - [x] `build/follow-wall.exe`、`build/tmp/*` 测试脚本/截图
+  - [x] 检查 `git diff --check`
 
 ## P1 — 硬件加速（优先解决墙卡顿）
 
-- [ ] 选型验证
-  - [ ] 方案 A：`GtkGLArea` + OpenGL textured quad
-    - [ ] 每首歌/每种尺寸用 cairo 预渲染成 `GdkTexture`
-    - [ ] 相机变换、选中缩放、光晕用 shader / MVP
-  - [ ] 方案 B：`GtkSnapshot` + `GdkTexture` 节点
+- [x] 选型验证
+  - [x] 方案 A：`GtkGLArea` + OpenGL textured quad
+    - [x] 每首歌/每种尺寸用 cairo 预渲染成 ARGB32，再上传成 GL 纹理（按曲目 / 尺寸 / 封面版本缓存）
+    - [x] 相机平移、选中缩放用 MVP / quad 变换；光晕用径向纹理 + 颜色 tint
+  - [ ] 方案 B：`GtkSnapshot` + `GdkTexture` 节点（暂不采用，A 已满足，保留作备选）
     - [ ] 保留 cairo 生成磁贴纹理
     - [ ] 每帧只 push 纹理节点 + transform，让 GSK / GPU 合成
     - [ ] 改动比 GLArea 小，优先试这个
-  - [ ] 不建议依赖 `GSK_RENDERER=gl` 加速 cairo：它只加速 GTK/GSK 合成，不加速 `GtkDrawingArea` 里的 cairo 绘制
-- [ ] 从 `GtkDrawingArea` 迁出墙层（或者墙单独一层，stage 仍用 cairo）
-- [ ] 保留 cairo 作为纹理生成器和无 GPU fallback
-- [ ] 背景/压暗/叠色从每帧全屏 cairo 填充改成 GPU 层或缓存纹理
-- [ ] 60fps 目标 + 帧时间统计
+  - [x] 不建议依赖 `GSK_RENDERER=gl` 加速 cairo：它只加速 GTK/GSK 合成，不加速 `GtkDrawingArea` 里的 cairo 绘制
+- [x] 从 `GtkDrawingArea` 迁出墙层：墙单独一层 GL，stage / chrome 仍用 cairo
+- [x] 保留 cairo 作为纹理生成器和无 GPU fallback（`FOLLOW_WALLGL=0` 可强制回退）
+- [x] 背景/压暗/叠色：背景用 glClear、压暗用单 quad，封面叠色烘进磁贴纹理
+- [x] 帧时间统计（`FOLLOW_WALL_DEBUG=1` 时每秒打印帧数 / ms / 上传数）
+- [x] 封面置色：Folia 式双径向柔光铺满整屏（含 SONGS 顶栏），focus 封面未加载时保持上一色
+- [x] 磁贴间距按 pitch = cell + gap 计算，block 接缝不再漏掉 gap
 - [ ] 低配模式
-  - [ ] `[ui] animations = false` 时直接 snap，不跑 60fps
+  - [x] `[ui] animations = false` 时直接 snap，不跑 60fps
   - [ ] 可选降低磁贴缓存分辨率 / 限制同屏数量
 
 ## P2 — 缓存
@@ -49,10 +51,10 @@
 - [x] 封面磁盘缓存 + 上限清理（`cache_prune_prefix`）
 - [x] 封面淡入 / 按尺寸缓存 / 磁贴内容缓存
 - [ ] 封面缓存
-  - [ ] `[cache] cover_max_mb` 配置解析
+  - [x] `[cache] cover_max_mb` 配置解析
   - [ ] 同一封面并发请求合并（`cover.c` 与 `covercache.c` 避免重复下载）
-  - [ ] 缓存损坏时自动删除重下
-- [ ] 解析结果缓存（模块已写，待接入）
+  - [x] 缓存损坏时自动删除重下
+- [x] 解析结果缓存（已接入 `source.c`，失效自动重解析）
 - [ ] 可选音频文件缓存（`[cache] audio = true`）
   - [ ] 后台下载完整音频到 `<cache>/follow/audio`
   - [ ] YouTube 定长 Range 分块下载

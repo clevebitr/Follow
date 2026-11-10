@@ -1,6 +1,6 @@
 CC      := gcc
 BUILD   := build
-PKGS    := gtk4 libqrencode libcurl json-glib-1.0 librsvg-2.0 libavformat libavcodec libswresample libavutil
+PKGS    := gtk4 epoxy libqrencode libcurl json-glib-1.0 librsvg-2.0 libavformat libavcodec libswresample libavutil
 
 CFLAGS  := -std=gnu17 -O2 -Wall -Wextra -MMD -MP -I./src -I./src/core -I./src/ui
 # 内置的 miniaudio.h 当系统头文件：不报它自己的警告

@@ -40,10 +40,12 @@
 #include "player.h"
 #include "playlist.h"
 #include "qrcard.h"
+#include "resolvecache.h"
 #include "stage.h"
 #include "stats.h"
 #include "ui.h"
 #include "viz.h"
+#include "wallgl.h"
 
 #ifndef FOLLOW_APP_ID
 #define FOLLOW_APP_ID "org.github.clevebitr.follow"
@@ -107,6 +109,8 @@ static gboolean on_anim_tick(gpointer data)
 
     if (app.canvas != NULL)
         gtk_widget_queue_draw(app.canvas);
+    if (app.chrome != NULL)
+        gtk_widget_queue_draw(app.chrome);
 
     busy = fx_running(&app.fx_stage) || fx_running(&app.fx_bg) ||
            playlist_animating();
@@ -134,6 +138,7 @@ static gboolean on_tick(gpointer data)
     (void)data;
 
     player_check_finished();
+    player_check_load_failure();
 
     playing = media_is_playing(&app.media);
     paused  = media_is_paused(&app.media);
@@ -176,7 +181,10 @@ static gboolean on_tick(gpointer data)
 
     if (app.dirty) {
         app.dirty = FALSE;
-        gtk_widget_queue_draw(app.canvas);
+        if (app.canvas != NULL)
+            gtk_widget_queue_draw(app.canvas);
+        if (app.chrome != NULL)
+            gtk_widget_queue_draw(app.chrome);
     }
 
     return G_SOURCE_CONTINUE;
@@ -416,6 +424,32 @@ static gboolean on_canvas_scroll(GtkEventControllerScroll *controller,
 }
 
 
+/* 窗口销毁时先把定时器和控件指针收干净：GApplication 的 shutdown
+ * 比窗口销毁晚一步，晚到的 tick 不能再碰已经释放的 canvas。 */
+static void on_window_destroy(GtkWidget *widget, gpointer data)
+{
+    (void)widget;
+    (void)data;
+
+    if (app.tick_id != 0) {
+        g_source_remove(app.tick_id);
+        app.tick_id = 0;
+    }
+    if (app.bg_tick_id != 0) {
+        g_source_remove(app.bg_tick_id);
+        app.bg_tick_id = 0;
+    }
+    if (app.anim_id != 0) {
+        g_source_remove(app.anim_id);
+        app.anim_id = 0;
+    }
+
+    app.canvas     = NULL;
+    app.chrome     = NULL;
+    app.wallgl     = NULL;
+    app.bg_picture = NULL;
+}
+
 static void activate(GtkApplication *app_, gpointer user_data)
 {
     const APPconfig    *cfg = config_get();
@@ -453,10 +487,25 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_widget_add_css_class(app.canvas, "canvas");
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.canvas), stage_render, NULL, NULL);
 
+    /* 歌曲墙：GL 层画磁贴，透明 chrome 层画表头 / 底栏。
+     * 两层都不接输入，鼠标事件继续落到 canvas 上。 */
+    app.wallgl = wallgl_new();
+
+    app.chrome = gtk_drawing_area_new();
+    gtk_widget_set_hexpand(app.chrome, TRUE);
+    gtk_widget_set_vexpand(app.chrome, TRUE);
+    gtk_widget_set_can_target(app.chrome, FALSE);
+    gtk_widget_add_css_class(app.chrome, "canvas");
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.chrome),
+                                   stage_chrome_render, NULL, NULL);
+
     overlay = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(overlay), app.bg_picture);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.canvas);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.wallgl);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.chrome);
     gtk_window_set_child(GTK_WINDOW(window), overlay);
+    g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
 
     keys = gtk_event_controller_key_new();
     g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key_pressed), NULL);
@@ -537,6 +586,7 @@ static void startup(GtkApplication *app_, gpointer user_data)
     config_load(CONFIG_PATH);
 
     cache_prune_prefix("cover", config_cover_max_bytes());
+    resolvecache_prune();
 
     g_message("cache: cover %.1f MB / limit %.0f MB",
               (double)cache_prefix_bytes("cover") / 1048576.0,

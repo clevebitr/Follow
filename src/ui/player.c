@@ -30,6 +30,18 @@ typedef struct {
     gchar      *error;
 } ResolveJob;
 
+static gpointer resolve_thread(gpointer data);
+
+static void resolve_start(const gchar *uri, guint gen)
+{
+    ResolveJob *job = g_new0(ResolveJob, 1);
+
+    job->gen = gen;
+    job->uri = g_strdup(uri);
+
+    g_thread_unref(g_thread_new("follow-resolve", resolve_thread, job));
+}
+
 static void set_resolved_meta(const gchar *title, const gchar *artist)
 {
     g_free(app.resolved_title);
@@ -51,6 +63,8 @@ static gboolean resolve_done(gpointer data)
     ResolveJob *job = data;
 
     if (job->gen == app.resolve_gen) {
+        app.source_pending = FALSE;
+
         if (job->src.url != NULL) {
             if (media_play(&app.media, job->src.url, job->src.headers, job->src.ranged) == 0) {
                 const AudioTrack *track = config_track_at(config_get(), (gsize)app.track);
@@ -58,6 +72,7 @@ static gboolean resolve_done(gpointer data)
                 gboolean has_artist = track != NULL && track->artist != NULL && *track->artist != '\0';
 
                 app.shown_second = -1;
+                app.source_cached = job->src.from_cache;
                 set_source_error(NULL);
 
                 /* ini 写了就用 ini 的，只有缺的字段才用解析结果补 */
@@ -68,10 +83,12 @@ static gboolean resolve_done(gpointer data)
                 player_update_window_title();
                 ui_request_redraw();
             } else {
+                app.source_cached = FALSE;
                 set_source_error("解码器打不开这个地址（详见日志）");
                 ui_request_redraw();
             }
         } else {
+            app.source_cached = FALSE;
             g_warning("play: %s", job->error != NULL ? job->error : "解析失败");
             set_source_error(job->error != NULL ? job->error : "解析失败");
             ui_request_redraw();
@@ -91,8 +108,6 @@ static gpointer resolve_thread(gpointer data)
 
     if (source_resolve(job->uri, &job->src, &job->error) != 0 && job->error == NULL)
         job->error = g_strdup("解析失败");
-
-    g_clear_pointer(&job->uri, g_free);
 
     g_idle_add(resolve_done, job);
     return NULL;
@@ -169,6 +184,10 @@ gboolean player_play_index(gint index)
     app.shown_second = -1;
     history_push(index);
 
+    app.source_cached  = FALSE;
+    app.source_retried = FALSE;
+    app.source_pending = FALSE;
+
     cover_set(track);
     lyricview_load(track);      /* 顺便把这首歌的歌词偏移重置成 ini 里的值 */
     qrcard_update(track);
@@ -178,13 +197,10 @@ gboolean player_play_index(gint index)
     ui_request_redraw();
 
     if (track->link_remote) {
-        ResolveJob *job = g_new0(ResolveJob, 1);
-
-        job->gen = ++app.resolve_gen;
-        job->uri = g_strdup(track->link);
-
         g_message("play: track[%d] %s -> resolving %s", index, track->id, track->link);
-        g_thread_unref(g_thread_new("follow-resolve", resolve_thread, job));
+
+        app.source_pending = TRUE;
+        resolve_start(track->link, ++app.resolve_gen);
         return TRUE;
     }
 
@@ -353,6 +369,34 @@ void player_toggle_shuffle(void)
 
     g_message("shuffle: %s", app.shuffle ? "on" : "off");
     ui_request_redraw();
+}
+
+/* 缓存直链失效：解码器报错后失效解析缓存并重新解析一次。
+ * 只重试一次，避免死链反复拉 API。 */
+void player_check_load_failure(void)
+{
+    const AudioTrack *track;
+
+    if (app.track < 0 || !app.source_cached || app.source_retried ||
+        app.source_pending || media_is_loading(&app.media))
+        return;
+
+    if (media_error(&app.media) == NULL)
+        return;
+
+    track = config_track_at(config_get(), (gsize)app.track);
+    if (track == NULL || !track->link_remote)
+        return;
+
+    g_message("play: cached link failed (%s), re-resolving once",
+              media_error(&app.media));
+
+    app.source_cached  = FALSE;
+    app.source_retried = TRUE;
+    app.source_pending = TRUE;
+
+    source_cache_invalidate(track->link);
+    resolve_start(track->link, app.resolve_gen);
 }
 
 void player_check_finished(void)

@@ -139,9 +139,6 @@ void resolvecache_prune(void)
     gint              ttl = config_resolve_ttl();
     gint64            now = g_get_real_time() / G_USEC_PER_SEC;
 
-    if (ttl <= 0)
-        return;
-
     d = g_dir_open(dir, 0, NULL);
     if (d == NULL)
         return;

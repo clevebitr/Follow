@@ -21,6 +21,10 @@
  * 下面那层动态背景是另一个 GtkPicture，这层画布是透明的。 */
 void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data);
 
+/* 歌曲墙 chrome 层（表头 / 底栏 / 帮助页），叠在 GL 墙层上方。 */
+void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int height,
+                         gpointer data);
+
 /* 切歌前调用：把当前画面拍成快照，用来退场。
  * 只有在已经有画面（canvas 有尺寸）时才有意义。 */
 void stage_snapshot(void);

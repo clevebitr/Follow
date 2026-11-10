@@ -23,6 +23,7 @@
 #include "stats.h"
 #include "theme.h"
 #include "ui.h"
+#include "wallgl.h"
 
 /* 时间统一 "00:00:26"：位数固定，宽度不会随秒数跳 */
 static gchar *format_time(double seconds)
@@ -354,10 +355,20 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
         if (playlist_is_closing())
             draw_stage(cr, width, height);
 
-        playlist_draw(cr, (double)width, (double)height);
+        /* GL 层可用时墙在 GPU 上画，cairo 这张画布保持透明；
+         * 表头 / 底栏由上层 chrome 画布负责。 */
+        if (wallgl_ready()) {
+            playlist_build_frame((double)width, (double)height);
 
-        if (app.help)
-            help_draw(cr, (double)width, (double)height);
+            /* 这一帧刚好播完退场：立刻把主界面补上，不留黑帧 */
+            if (!playlist_is_open())
+                draw_stage(cr, width, height);
+        } else {
+            playlist_draw(cr, (double)width, (double)height);
+
+            if (!playlist_is_open())
+                draw_stage(cr, width, height);
+        }
 
         return;
     }
@@ -383,6 +394,22 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
         if (app.snapshot != NULL)          /* 过渡走完，快照可以扔了 */
             g_clear_pointer(&app.snapshot, cairo_surface_destroy);
     }
+
+    if (app.help)
+        help_draw(cr, (double)width, (double)height);
+}
+
+/* 墙的表头 / 底栏 / 帮助页：画在 GL 层上面的透明画布上，不参与磁贴绘制。 */
+void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int height,
+                         gpointer data)
+{
+    (void)area;
+    (void)data;
+
+    if (width <= 0 || height <= 0 || !playlist_is_open())
+        return;
+
+    playlist_draw_chrome(cr, (double)width, (double)height);
 
     if (app.help)
         help_draw(cr, (double)width, (double)height);

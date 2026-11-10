@@ -37,6 +37,8 @@ typedef struct {
     /* GTK */
     GtkWidget *window;
     GtkWidget *canvas;
+    GtkWidget *wallgl;      /* 歌曲墙 GPU 层 */
+    GtkWidget *chrome;      /* 歌曲墙表头 / 底栏 / 帮助页（透明层） */
     GtkWidget *bg_picture;
     guint      tick_id;
     guint      bg_tick_id;
@@ -59,6 +61,9 @@ typedef struct {
     gint     history[64];         /* 随机播放历史 */
     gint     history_len;
     guint    resolve_gen;         /* 丢弃过期的网络解析结果 */
+    gboolean source_pending;      /* 远程解析进行中 */
+    gboolean source_cached;       /* 本次播放用的是解析缓存直链 */
+    gboolean source_retried;      /* 缓存直链失败后已重解析过一次 */
     gchar   *resolved_title;      /* 网络来源解析出的曲名 */
     gchar   *resolved_artist;
     gchar   *source_error;        /* 网络解析失败的原因（显示在歌词那行） */

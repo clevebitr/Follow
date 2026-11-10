@@ -23,6 +23,7 @@
 #include "player.h"
 #include "theme.h"
 #include "ui.h"
+#include "wallgl.h"
 
 /* 无限歌曲墙。12x8 的 block 在二维方向重复；每个 block 从几个模板里随机选
  * 一个、随机翻转、随机打乱歌曲顺序。布局思路参考 Folia 的 poster wall，
@@ -81,7 +82,7 @@ static struct {
     int      hover_bx, hover_by, hover_slot;
 
     /* 页面几何 */
-    double   cell, gap, block_w, block_h;
+    double   cell, gap, pitch, block_w, block_h;
     double   pad_x, header_h, bottom_h;
     double   screen_w, screen_h;
 
@@ -90,11 +91,18 @@ static struct {
     gboolean bg_has;
     gboolean bg_moving;
 
+    /* 最近一帧的进场 / 退场进度；GL 与 chrome 层共用 */
+    double   vis;
+    gboolean gl_chrome;      /* 当前帧墙由 GL 层绘制，chrome 层负责表头 / 底栏 */
+
     PlHit    hit[PL_MAX_HITS];
     int      n_hits;
 
     gchar   *message;
 } P;
+
+/* 构建 GL 帧时复用，避免每帧 malloc/free */
+static WallGlTile g_frame_tiles[PL_MAX_HITS + 1];
 
 /* 三个 12x8 的 exact-cover 模板。尺寸混合不同，随机选一个就不会每次长得一样。 */
 static const PlTemplate g_templates[] = {
@@ -233,8 +241,11 @@ static void update_metrics(double w, double h)
     P.pad_x     = clampd(w * 0.035, 18.0, 64.0);
     P.gap       = clampd(h * 0.010, 7.0, 14.0);
     P.cell      = clampd(h * 0.078, 50.0, 124.0);
-    P.block_w   = 12.0 * P.cell + 11.0 * P.gap;
-    P.block_h   = 8.0 * P.cell + 7.0 * P.gap;
+    P.pitch     = P.cell + P.gap;
+    /* 和 Folia 的 layout.ts 一致：block 本身也占一个完整 pitch，
+     * 块与块之间才有一致的间距（12*cell + 11*gap 会在接缝处丢掉这个 gap）。 */
+    P.block_w   = 12.0 * P.pitch;
+    P.block_h   = 8.0 * P.pitch;
     P.header_h  = clampd(h * 0.145, 72.0, 164.0);
     P.bottom_h  = clampd(h * 0.105, 54.0, 104.0);
 }
@@ -246,10 +257,10 @@ static void slot_rect(int bx, int by, const PlTemplate *tpl, int flip, int slot,
     int    sx = (flip & 1) ? 12 - s.x - s.cols : s.x;
     int    sy = (flip & 2) ? 8 - s.y - s.rows : s.y;
 
-    *x = (double)bx * P.block_w + (double)sx * (P.cell + P.gap);
-    *y = (double)by * P.block_h + (double)sy * (P.cell + P.gap);
-    *w = (double)s.cols * P.cell + (double)(s.cols - 1) * P.gap;
-    *h = (double)s.rows * P.cell + (double)(s.rows - 1) * P.gap;
+    *x = (double)bx * P.block_w + (double)sx * P.pitch;
+    *y = (double)by * P.block_h + (double)sy * P.pitch;
+    *w = (double)s.cols * P.pitch - P.gap;
+    *h = (double)s.rows * P.pitch - P.gap;
 }
 
 static void focus_refresh_world(void)
@@ -907,11 +918,39 @@ typedef struct {
 
 static PlTileCache g_tile_cache[PL_TILE_CACHE_MAX];
 
+#define PL_OVERLAY_CACHE_MAX 16
+
+typedef struct {
+    cairo_surface_t *surface;
+    gsize            track;
+    int              w, h;
+    gint64           version;
+    guint            flags;
+    gint64           used_us;
+    gboolean         used;
+} PlOverlayCache;
+
+static PlOverlayCache g_overlay_cache[PL_OVERLAY_CACHE_MAX];
+
+/* 普通磁贴的细边框；和磁贴内容一起缓存进纹理。 */
+static void draw_normal_border(cairo_t *cr, double x, double y, double w, double h)
+{
+    color_set(cr, WHITE(0.05));
+    cairo_set_line_width(cr, 1.0);
+    path_round_rect(cr, x + 0.5, y + 0.5, w - 1.0, h - 1.0, 2.0);
+    cairo_stroke(cr);
+}
+
 static void tile_cache_clear(void)
 {
     for (int i = 0; i < PL_TILE_CACHE_MAX; i++) {
         g_clear_pointer(&g_tile_cache[i].surface, cairo_surface_destroy);
         g_tile_cache[i].used = FALSE;
+    }
+
+    for (int i = 0; i < PL_OVERLAY_CACHE_MAX; i++) {
+        g_clear_pointer(&g_overlay_cache[i].surface, cairo_surface_destroy);
+        g_overlay_cache[i].used = FALSE;
     }
 }
 
@@ -959,6 +998,7 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
     draw_tile_content(cr, track, 0.0, 0.0, (double)w, (double)h, TRUE);
+    draw_normal_border(cr, 0.0, 0.0, (double)w, (double)h);
     cairo_destroy(cr);
 
     g_tile_cache[slot].surface = surface;
@@ -970,6 +1010,57 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     g_tile_cache[slot].used    = TRUE;
 
     return surface;
+}
+
+/* 磁贴上的标记层：当前曲目强调条 / ♪、选中描边、悬停边框。
+ * 单独抬出来，cairo 回退和 GL 纹理共用同一套绘制。 */
+static void draw_tile_decoration(cairo_t *cr, gsize track_index,
+                                 double x, double y, double w, double h,
+                                 gboolean selected, gboolean hovered,
+                                 gboolean current)
+{
+    const Palette *pal = covercache_palette(track_index);
+    double         radius = 2.0;
+
+    if (current) {
+        Rgba accent = (pal != NULL && pal->has)
+            ? RGBA(pal->seed_r * 0.65 + 0.35, pal->seed_g * 0.65 + 0.35,
+                   pal->seed_b * 0.65 + 0.35, 1.0)
+            : WHITE(0.85);
+        TextStyle note = TEXT_STYLE(FONT_MONO, clampd(w * 0.055, 8.0, 11.0),
+                                    PANGO_WEIGHT_BOLD, 0.0, accent);
+
+        color_set(cr, accent);
+        cairo_rectangle(cr, x + 1.0, y + 1.0, 4.0, h - 2.0);
+        cairo_fill(cr);
+
+        color_set(cr, RGBA(0.0, 0.0, 0.0, 0.42));
+        path_round_rect(cr, x + 9.0, y + 9.0, 22.0, 22.0, 2.0);
+        cairo_fill(cr);
+        text_draw(cr, "♪", &note, x + 20.0, y + 13.0, TEXT_CENTER, 0.0);
+    }
+
+    if (selected) {
+        color_set(cr, RGBA(1.0, 1.0, 1.0, 0.10));
+        cairo_set_line_width(cr, 7.0);
+        path_round_rect(cr, x - 3.5, y - 3.5, w + 7.0, h + 7.0, radius + 3.0);
+        cairo_stroke(cr);
+
+        color_set(cr, RGBA(0.0, 0.0, 0.0, 0.62));
+        cairo_set_line_width(cr, 5.0);
+        path_round_rect(cr, x - 1.5, y - 1.5, w + 3.0, h + 3.0, radius + 1.5);
+        cairo_stroke(cr);
+
+        color_set(cr, WHITE(0.98));
+        cairo_set_line_width(cr, 3.0);
+        path_round_rect(cr, x + 1.0, y + 1.0, w - 2.0, h - 2.0, radius);
+        cairo_stroke(cr);
+    } else if (hovered) {
+        color_set(cr, WHITE(0.36));
+        cairo_set_line_width(cr, 1.0);
+        path_round_rect(cr, x + 1.0, y + 1.0, w - 2.0, h - 2.0, radius);
+        cairo_stroke(cr);
+    }
 }
 
 static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
@@ -1038,86 +1129,168 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
                 cairo_paint_with_alpha(cr, reveal);
         } else {
             draw_tile_content(cr, track_index, x, y, w, h, FALSE);
+            draw_normal_border(cr, x, y, w, h);
         }
     }
 
-    if (current) {
-        Rgba accent = (pal != NULL && pal->has)
-            ? RGBA(pal->seed_r * 0.65 + 0.35, pal->seed_g * 0.65 + 0.35,
-                   pal->seed_b * 0.65 + 0.35, 1.0)
-            : WHITE(0.85);
-        TextStyle note = TEXT_STYLE(FONT_MONO, clampd(w * 0.055, 8.0, 11.0),
-                                    PANGO_WEIGHT_BOLD, 0.0, accent);
-
-        color_set(cr, accent);
-        cairo_rectangle(cr, x + 1.0, y + 1.0, 4.0, h - 2.0);
-        cairo_fill(cr);
-
-        color_set(cr, RGBA(0.0, 0.0, 0.0, 0.42));
-        path_round_rect(cr, x + 9.0, y + 9.0, 22.0, 22.0, 2.0);
-        cairo_fill(cr);
-        text_draw(cr, "♪", &note, x + 20.0, y + 13.0, TEXT_CENTER, 0.0);
-    }
-
-    if (selected) {
-        color_set(cr, RGBA(1.0, 1.0, 1.0, 0.10));
-        cairo_set_line_width(cr, 7.0);
-        path_round_rect(cr, x - 3.5, y - 3.5, w + 7.0, h + 7.0, radius + 3.0);
-        cairo_stroke(cr);
-
-        color_set(cr, RGBA(0.0, 0.0, 0.0, 0.62));
-        cairo_set_line_width(cr, 5.0);
-        path_round_rect(cr, x - 1.5, y - 1.5, w + 3.0, h + 3.0, radius + 1.5);
-        cairo_stroke(cr);
-
-        color_set(cr, WHITE(0.98));
-        cairo_set_line_width(cr, 3.0);
-        path_round_rect(cr, x + 1.0, y + 1.0, w - 2.0, h - 2.0, radius);
-        cairo_stroke(cr);
-    } else if (hovered) {
-        color_set(cr, WHITE(0.36));
-        cairo_set_line_width(cr, 1.0);
-        path_round_rect(cr, x + 1.0, y + 1.0, w - 2.0, h - 2.0, radius);
-        cairo_stroke(cr);
-    } else {
-        color_set(cr, WHITE(0.05));
-        cairo_set_line_width(cr, 1.0);
-        path_round_rect(cr, x + 0.5, y + 0.5, w - 1.0, h - 1.0, radius);
-        cairo_stroke(cr);
-    }
+    draw_tile_decoration(cr, track_index, x, y, w, h, selected, hovered, current);
 
     if (pop != 1.0)
         cairo_restore(cr);
 }
 
-static void draw_background(cairo_t *cr, double w, double h)
+cairo_surface_t *playlist_tile_surface(gsize track, int w, int h)
 {
-    const Palette *pal = P.bg_has ? &P.bg_pal : NULL;
+    return tile_cache_get(track, w, h, covercache_version(track));
+}
+
+/* GL 层用的标记纹理：只有选中 / 悬停 / 当前曲目时才生成。
+ * 四周留 4px 给选中描边的外描边。 */
+cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
+                                       gboolean selected, gboolean hovered,
+                                       gboolean current)
+{
+    guint           flags = (selected ? 1u : 0u) | (hovered ? 2u : 0u) |
+                            (current ? 4u : 0u);
+    gint64          version = covercache_version(track);
+    gint64          now = now_us();
+    cairo_surface_t *surface;
+    int             slot = -1;
+    cairo_t        *cr;
+
+    if (w < 8 || h < 8 || flags == 0)
+        return NULL;
+
+    for (int i = 0; i < PL_OVERLAY_CACHE_MAX; i++) {
+        if (g_overlay_cache[i].used && g_overlay_cache[i].track == track &&
+            g_overlay_cache[i].w == w && g_overlay_cache[i].h == h &&
+            g_overlay_cache[i].version == version &&
+            g_overlay_cache[i].flags == flags) {
+            g_overlay_cache[i].used_us = now;
+            return g_overlay_cache[i].surface;
+        }
+
+        if (!g_overlay_cache[i].used) {
+            slot = i;
+            break;
+        }
+
+        if (slot < 0 || g_overlay_cache[i].used_us < g_overlay_cache[slot].used_us)
+            slot = i;
+    }
+
+    if (slot < 0)
+        return NULL;
+
+    g_clear_pointer(&g_overlay_cache[slot].surface, cairo_surface_destroy);
+
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w + 8, h + 8);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surface);
+        g_overlay_cache[slot].used = FALSE;
+        return NULL;
+    }
+
+    cr = cairo_create(surface);
+    cairo_translate(cr, 4.0, 4.0);
+    draw_tile_decoration(cr, track, 0.0, 0.0, (double)w, (double)h,
+                         selected, hovered, current);
+    cairo_destroy(cr);
+
+    g_overlay_cache[slot].surface = surface;
+    g_overlay_cache[slot].track   = track;
+    g_overlay_cache[slot].w       = w;
+    g_overlay_cache[slot].h       = h;
+    g_overlay_cache[slot].version = version;
+    g_overlay_cache[slot].flags   = flags;
+    g_overlay_cache[slot].used_us = now;
+    g_overlay_cache[slot].used    = TRUE;
+
+    return surface;
+}
+
+/* 当前应该拿来给整屏置色的封面：优先 focus，还没就位时先用正在播放的那首。 */
+static const Palette *background_palette(void)
+{
+    if (P.bg_has && P.bg_pal.has)
+        return &P.bg_pal;
+
+    if (app.palette.has)
+        return &app.palette;
+
+    return NULL;
+}
+
+static void background_color(double *r, double *g, double *b)
+{
+    const Palette *pal = background_palette();
     double         pr = 0.55, pg = 0.68, pb = 0.92;
 
-    if (pal == NULL || !pal->has) {
-        pal = app.palette.has ? &app.palette : NULL;
-
-        if (pal != NULL && pal->has) {
-            pr = pal->seed_r;
-            pg = pal->seed_g;
-            pb = pal->seed_b;
-        }
-    } else {
+    if (pal != NULL) {
         pr = pal->seed_r;
         pg = pal->seed_g;
         pb = pal->seed_b;
     }
 
-    /* 一面整屏底色就够了：磁贴本身已经有封面/叠色/渐变，
-     * 这里再叠多层全屏渐变会把每帧成本拉高。 */
-    cairo_set_source_rgba(cr,
-                          0.008 + pr * 0.07,
-                          0.010 + pg * 0.07,
-                          0.016 + pb * 0.07,
-                          0.88);
+    /* 底色只给一点点色相，真正的置色交给两团柔光（和 Folia 的 root 一样） */
+    *r = 0.012 + pr * 0.035;
+    *g = 0.013 + pg * 0.035;
+    *b = 0.018 + pb * 0.035;
+}
+
+static void draw_tint(cairo_t *cr, double w, double h)
+{
+    const Palette *pal = background_palette();
+    double         diag;
+
+    if (pal == NULL)
+        return;
+
+    diag = hypot(w, h);
+
+    {
+        cairo_pattern_t *p = cairo_pattern_create_radial(
+            w * 0.14, h * 0.12, 0.0, w * 0.14, h * 0.12, diag * 0.30);
+
+        cairo_pattern_add_color_stop_rgba(p, 0.00, pal->seed_r, pal->seed_g,
+                                          pal->seed_b, 0.18);
+        cairo_pattern_add_color_stop_rgba(p, 0.55, pal->seed_r, pal->seed_g,
+                                          pal->seed_b, 0.07);
+        cairo_pattern_add_color_stop_rgba(p, 1.00, pal->seed_r, pal->seed_g,
+                                          pal->seed_b, 0.0);
+        cairo_set_source(cr, p);
+        cairo_paint(cr);
+        cairo_pattern_destroy(p);
+    }
+
+    {
+        cairo_pattern_t *p = cairo_pattern_create_radial(
+            w * 0.86, h * 0.82, 0.0, w * 0.86, h * 0.82, diag * 0.32);
+
+        cairo_pattern_add_color_stop_rgba(p, 0.00, pal->alt_r, pal->alt_g,
+                                          pal->alt_b, 0.20);
+        cairo_pattern_add_color_stop_rgba(p, 0.55, pal->alt_r, pal->alt_g,
+                                          pal->alt_b, 0.08);
+        cairo_pattern_add_color_stop_rgba(p, 1.00, pal->alt_r, pal->alt_g,
+                                          pal->alt_b, 0.0);
+        cairo_set_source(cr, p);
+        cairo_paint(cr);
+        cairo_pattern_destroy(p);
+    }
+}
+
+static void draw_background(cairo_t *cr, double w, double h)
+{
+    double r, g, b;
+
+    background_color(&r, &g, &b);
+
+    cairo_set_source_rgba(cr, r, g, b, 0.88);
     cairo_rectangle(cr, 0.0, 0.0, w, h);
     cairo_fill(cr);
+
+    /* 两团柔光铺满整屏：SONGS 那一行也会被置色 */
+    draw_tint(cr, w, h);
 }
 
 static void draw_header(cairo_t *cr, double w, double h, gsize n_tracks)
@@ -1137,15 +1310,26 @@ static void draw_header(cairo_t *cr, double w, double h, gsize n_tracks)
     double hint_w = text_width(cr, hint_text, &hint);
 
     {
-        cairo_pattern_t *top = cairo_pattern_create_linear(0.0, 0.0, 0.0,
-                                                           P.header_h * 1.25);
+        const Palette *pal = background_palette();
+        double         vr = 0.006, vg = 0.007, vb = 0.012;
 
-        cairo_pattern_add_color_stop_rgba(top, 0.0, 0.005, 0.006, 0.010, 0.72);
-        cairo_pattern_add_color_stop_rgba(top, 1.0, 0.005, 0.006, 0.010, 0.0);
-        cairo_set_source(cr, top);
-        cairo_rectangle(cr, 0.0, 0.0, w, P.header_h * 1.25);
+        /* 和底栏一样：整条实心颜色衬 + 一条细线收边。
+         * 不做淡出，否则渐变尾段会变成一条“既不是衬、也不是墙”的灰带。 */
+        if (pal != NULL) {
+            vr = 0.004 + pal->seed_r * 0.07;
+            vg = 0.005 + pal->seed_g * 0.07;
+            vb = 0.009 + pal->seed_b * 0.07;
+        }
+
+        color_set(cr, RGBA(vr, vg, vb, 0.90));
+        cairo_rectangle(cr, 0.0, 0.0, w, P.header_h);
         cairo_fill(cr);
-        cairo_pattern_destroy(top);
+
+        color_set(cr, WHITE(0.08));
+        cairo_set_line_width(cr, 1.0);
+        cairo_move_to(cr, 0.0, P.header_h + 0.5);
+        cairo_line_to(cr, w, P.header_h + 0.5);
+        cairo_stroke(cr);
     }
 
     text_draw(cr, "SONGS", &title, pad, y, TEXT_LEFT, 0.0);
@@ -1197,7 +1381,18 @@ static void draw_bottom(cairo_t *cr, double w, double h, gsize n_tracks)
             artist = g_strdup(track->artist);
     }
 
-    color_set(cr, RGBA(0.008, 0.010, 0.016, 0.90));
+    {
+        const Palette *pal = background_palette();
+        double         br = 0.006, bg = 0.007, bb = 0.012;
+
+        if (pal != NULL) {
+            br = 0.004 + pal->seed_r * 0.07;
+            bg = 0.005 + pal->seed_g * 0.07;
+            bb = 0.009 + pal->seed_b * 0.07;
+        }
+
+        color_set(cr, RGBA(br, bg, bb, 0.90));
+    }
     cairo_rectangle(cr, 0.0, bar_y, w, P.bottom_h);
     cairo_fill(cr);
 
@@ -1400,6 +1595,8 @@ void playlist_open_page(void)
 
     P.open        = TRUE;
     P.closing     = FALSE;
+    P.vis         = 0.0;
+    P.gl_chrome   = FALSE;
     P.seed        = (guint32)g_random_int() | 1u;
     P.dragging    = FALSE;
     P.drag_moved  = FALSE;
@@ -1428,6 +1625,10 @@ void playlist_open_page(void)
         focus_find_track(app.track >= 0 ? app.track : 0, start_bx, start_by, 3);
     }
 
+    /* 预载所有封面：鼠标把选中磁贴拖出相机、focus 换到别的磁贴后，置色也有色可用 */
+    for (gsize i = 0; i < cfg->n_tracks; i++)
+        covercache_surface(i);
+
     focus_center_camera(TRUE);
 
     {
@@ -1447,6 +1648,7 @@ void playlist_open_page(void)
 
     fx_stop(&P.close_fx);
 
+    wallgl_set_active(TRUE);
     ui_animate();
     ui_request_redraw();
 }
@@ -1466,6 +1668,7 @@ void playlist_close(void)
     } else {
         P.open    = FALSE;
         P.closing = FALSE;
+        wallgl_set_active(FALSE);
     }
 
     ui_request_redraw();
@@ -1649,20 +1852,17 @@ void playlist_hover(double x, double y)
     }
 }
 
-void playlist_draw(cairo_t *cr, double w, double h)
+/* 每帧的相机 / 动效推进。GL 与 cairo 回退共用，返回当前透明度。 */
+static double playlist_frame_update(double w, double h)
 {
     const APPconfig *cfg = config_get();
     gsize            n_tracks = cfg->n_tracks;
     gint64           now;
     double           dt, enter_p, close_p, vis;
 
-    if (!P.open)
-        return;
-
     covercache_sync();
     update_metrics(w, h);
     focus_refresh_world();
-
 
     now = now_us();
     dt  = (double)(now - P.last_draw_us) / 1000000.0;
@@ -1710,23 +1910,25 @@ void playlist_draw(cairo_t *cr, double w, double h)
     if (P.closing && close_p >= 1.0) {
         P.open    = FALSE;
         P.closing = FALSE;
+        P.vis     = 0.0;
         fx_stop(&P.close_fx);
         tile_cache_clear();
+        wallgl_set_active(FALSE);
         ui_request_redraw();
-        return;
+        return 0.0;
     }
 
     vis = enter_p * (1.0 - close_p);
+    P.vis = vis;
 
     if (vis <= 0.001)
-        return;
+        return vis;
 
-    /* 背景主色：跟随 focus 封面做 crossfade */
-    if (n_tracks > 0) {
+    /* 背景主色：跟随 focus 封面做 crossfade。
+     * focus 的封面还没加载完时保留上一次的颜色，不再临时换成正在播放的画面，
+     * 否则把选中的磁贴拖出相机后置色会跳一下 / 看着像失效。 */
+    if (n_tracks > 0 && P.focus_track >= 0) {
         const Palette *target = covercache_palette((gsize)P.focus_track);
-
-        if (target == NULL || !target->has)
-            target = app.palette.has ? &app.palette : NULL;
 
         if (target != NULL && target->has) {
             if (!P.bg_has) {
@@ -1748,6 +1950,193 @@ void playlist_draw(cairo_t *cr, double w, double h)
     } else {
         P.bg_moving = FALSE;
     }
+
+    return vis;
+}
+
+/* GL 层：构建可见磁贴列表并推给 wallgl。 */
+void playlist_build_frame(double w, double h)
+{
+    const APPconfig *cfg = config_get();
+    WallGlFrame      f = { 0 };
+    WallGlTile       selected_tile = { 0 };
+    const Palette   *focus_pal;
+    int              n = (int)cfg->n_tracks;
+    double           vis;
+    gboolean         have_selected = FALSE;
+
+    if (!P.open)
+        return;
+
+    vis = playlist_frame_update(w, h);
+
+    if (!P.open)
+        return;
+
+    f.view_w     = w;
+    f.view_h     = h;
+    f.dim_top    = P.header_h;
+    f.dim_bottom = h - P.bottom_h;
+    f.vis        = vis;
+    f.offset_y   = (1.0 - vis) * 28.0;
+    f.selected   = -1;
+
+    background_color(&f.bg_r, &f.bg_g, &f.bg_b);
+
+    {
+        const Palette *pal = background_palette();
+
+        if (pal != NULL) {
+            f.tint         = TRUE;
+            f.tint_seed_r  = pal->seed_r;
+            f.tint_seed_g  = pal->seed_g;
+            f.tint_seed_b  = pal->seed_b;
+            f.tint_alt_r   = pal->alt_r;
+            f.tint_alt_g   = pal->alt_g;
+            f.tint_alt_b   = pal->alt_b;
+        }
+    }
+
+    f.tiles = g_frame_tiles;
+
+    P.n_hits = 0;
+
+    if (n > 0 && vis > 0.001) {
+        double overscan = P.cell * 0.8;
+        int    bx0 = (int)floor((P.cam_x - overscan) / P.block_w);
+        int    bx1 = (int)floor((P.cam_x + w + overscan) / P.block_w);
+        int    by0 = (int)floor((P.cam_y - overscan) / P.block_h);
+        int    by1 = (int)floor((P.cam_y + h + overscan) / P.block_h);
+
+        for (int by = by0; by <= by1; by++) {
+            for (int bx = bx0; bx <= bx1; bx++) {
+                guint32 bh = block_hash(bx, by);
+                const PlTemplate *tpl = block_template(bh);
+                int flip = block_flip(bh);
+                int order[PL_TEMPLATE_MAX];
+
+                block_order(bh, n, tpl->count, order);
+
+                for (int s = 0; s < tpl->count; s++) {
+                    double   wx, wy, ww, wh, x, y;
+                    gboolean selected, hovered;
+                    WallGlTile t;
+
+                    slot_rect(bx, by, tpl, flip, s, &wx, &wy, &ww, &wh);
+                    x = wx - P.cam_x;
+                    y = wy - P.cam_y;
+
+                    if (x + ww < -overscan || x > w + overscan ||
+                        y + wh < -overscan || y > h + overscan)
+                        continue;
+
+                    selected = P.focus_valid && bx == P.focus_bx &&
+                               by == P.focus_by && s == P.focus_slot;
+                    hovered  = P.hover_valid && bx == P.hover_bx &&
+                               by == P.hover_by && s == P.hover_slot;
+
+                    if (P.n_hits < PL_MAX_HITS) {
+                        PlHit *hit = &P.hit[P.n_hits++];
+
+                        hit->track = order[s];
+                        hit->bx = bx;
+                        hit->by = by;
+                        hit->slot = s;
+                        hit->x = x;
+                        hit->y = y;
+                        hit->w = ww;
+                        hit->h = wh;
+                    }
+
+                    t.track    = (gsize)order[s];
+                    t.x        = x;
+                    t.y        = y;
+                    t.w        = ww;
+                    t.h        = wh;
+                    t.selected = selected;
+                    t.hovered  = hovered;
+                    t.current  = t.track == (gsize)app.track;
+                    t.reveal   = (float)covercache_reveal(t.track);
+
+                    if (selected) {
+                        selected_tile = t;
+                        have_selected = TRUE;
+                    } else if (f.n_tiles < PL_MAX_HITS) {
+                        f.tiles[f.n_tiles++] = t;
+                    }
+                }
+            }
+        }
+    }
+
+    if (have_selected) {
+        double pop = 1.0;
+
+        if (config_animations()) {
+            double age = (double)(now_us() - P.sel_us) / 1000000.0;
+
+            pop = 1.0 + 0.028 * exp(-age * 12.0);
+        }
+
+        f.selected = f.n_tiles;
+        f.selected_pop = pop;
+        f.tiles[f.n_tiles++] = selected_tile;
+
+        focus_pal = covercache_palette(selected_tile.track);
+
+        if (focus_pal != NULL && focus_pal->has) {
+            f.glow     = TRUE;
+            f.glow_r   = focus_pal->seed_r;
+            f.glow_g   = focus_pal->seed_g;
+            f.glow_b   = focus_pal->seed_b;
+        }
+    }
+
+    wallgl_set_frame(&f);
+
+    P.gl_chrome = TRUE;
+}
+
+void playlist_draw_chrome(cairo_t *cr, double w, double h)
+{
+    const APPconfig *cfg = config_get();
+    gsize            n_tracks = cfg->n_tracks;
+    double           vis = P.vis;
+
+    if (!P.open || !P.gl_chrome || vis <= 0.001)
+        return;
+
+    if (vis < 0.999) {
+        cairo_push_group(cr);
+        cairo_translate(cr, 0.0, (1.0 - vis) * 28.0);
+    }
+
+    if (n_tracks == 0)
+        draw_empty(cr, w, h);
+
+    draw_header(cr, w, h, n_tracks);
+    draw_bottom(cr, w, h, n_tracks);
+
+    if (vis < 0.999) {
+        cairo_pop_group_to_source(cr);
+        cairo_paint_with_alpha(cr, vis);
+    }
+}
+
+void playlist_draw(cairo_t *cr, double w, double h)
+{
+    const APPconfig *cfg = config_get();
+    gsize            n_tracks = cfg->n_tracks;
+    double           vis;
+
+    if (!P.open)
+        return;
+
+    P.gl_chrome = FALSE;
+    vis = playlist_frame_update(w, h);
+
+    if (vis <= 0.001)
+        return;
 
     if (vis < 0.999) {
         cairo_push_group(cr);
@@ -1773,6 +2162,7 @@ void playlist_draw(cairo_t *cr, double w, double h)
 
 void playlist_clear(void)
 {
+    wallgl_clear();
     g_clear_pointer(&P.message, g_free);
     tile_cache_clear();
     covercache_clear();
