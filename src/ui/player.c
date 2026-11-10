@@ -39,18 +39,26 @@ static void set_resolved_meta(const gchar *title, const gchar *artist)
     ui_request_redraw();
 }
 
+/* 解析失败的原因：显示到歌词那行，不然用户只看到"没反应" */
+static void set_source_error(const gchar *message)
+{
+    g_free(app.source_error);
+    app.source_error = (message != NULL && *message != '\0') ? g_strdup(message) : NULL;
+}
+
 static gboolean resolve_done(gpointer data)
 {
     ResolveJob *job = data;
 
     if (job->gen == app.resolve_gen) {
         if (job->src.url != NULL) {
-            if (media_play(&app.media, job->src.url, job->src.headers) == 0) {
+            if (media_play(&app.media, job->src.url, job->src.headers, job->src.ranged) == 0) {
                 const AudioTrack *track = config_track_at(config_get(), (gsize)app.track);
                 gboolean has_title  = track != NULL && track->title != NULL && *track->title != '\0';
                 gboolean has_artist = track != NULL && track->artist != NULL && *track->artist != '\0';
 
                 app.shown_second = -1;
+                set_source_error(NULL);
 
                 /* ini 写了就用 ini 的，只有缺的字段才用解析结果补 */
                 if (!has_title || !has_artist)
@@ -59,9 +67,14 @@ static gboolean resolve_done(gpointer data)
 
                 player_update_window_title();
                 ui_request_redraw();
+            } else {
+                set_source_error("解码器打不开这个地址（详见日志）");
+                ui_request_redraw();
             }
         } else {
             g_warning("play: %s", job->error != NULL ? job->error : "解析失败");
+            set_source_error(job->error != NULL ? job->error : "解析失败");
+            ui_request_redraw();
         }
     }
 
@@ -160,6 +173,7 @@ gboolean player_play_index(gint index)
     lyricview_load(track);      /* 顺便把这首歌的歌词偏移重置成 ini 里的值 */
     qrcard_update(track);
     set_resolved_meta(NULL, NULL);
+    set_source_error(NULL);
     player_update_window_title();
     ui_request_redraw();
 
@@ -184,7 +198,7 @@ gboolean player_play_index(gint index)
         return FALSE;
     }
 
-    if (media_play(&app.media, local, NULL) != 0) {
+    if (media_play(&app.media, local, NULL, FALSE) != 0) {
         g_warning("track %s: cannot play %s", track->id, local);
         return FALSE;
     }
@@ -305,6 +319,7 @@ void player_restart(void)
 void player_stop(void)
 {
     media_stop(&app.media);
+    set_source_error(NULL);
     ui_request_redraw();
 }
 
@@ -381,4 +396,5 @@ void player_clear(void)
     app.resolve_gen++;              /* 作废还在解析的请求 */
     g_clear_pointer(&app.resolved_title, g_free);
     g_clear_pointer(&app.resolved_artist, g_free);
+    g_clear_pointer(&app.source_error, g_free);
 }

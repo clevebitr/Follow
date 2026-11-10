@@ -17,6 +17,7 @@
 /* 解析ini link：
  *   本地路径        → 原样
  *   B 站视频页面     → 走 API 解析出音频直链 + Referer 请求头 + 标题/UP 主
+ *   YouTube 视频页面 → 走 InnerTube 解析出音频直链 + UA 请求头 + 标题/频道名
  *   其它 http(s) 直链 → 原样（给解码器自己处理）
  */
 typedef struct {
@@ -25,6 +26,7 @@ typedef struct {
     gchar   *title;     /* 网络来源解析出来的标题，可为 NULL */
     gchar   *artist;
     gboolean resolved;  /* TRUE = 经过解析器 */
+    gboolean ranged;    /* TRUE = 播放时要走定长 Range 分块读（googlevideo） */
 } MediaSource;
 
 /* 成功返回 0；失败返回 -1 并给出 *error */

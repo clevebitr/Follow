@@ -14,10 +14,9 @@
 
 #include <glib.h>
 
-//TODO:ini define
-
-/* 统一的磁盘缓存目录：<user cache>/follow/
- * 歌词、封面、B 站元数据都放这里，按 key 的 md5 命名。 */
+/* 统一的磁盘缓存目录：默认 <用户缓存目录>/follow，可在 [cache] dir 里改
+ * （支持 ~ 和相对路径）。歌词、封面、B 站元数据、收听统计都放这里，
+ * 按 key 的 md5 命名。 */
 
 /* 确保目录存在并返回（新分配的字符串） */
 gchar *follow_cache_dir(void);

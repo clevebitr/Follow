@@ -14,17 +14,17 @@
 #include <string.h>
 
 #include "http.h"
-
-//TODO: ini define
-#define FOLLOW_USER_AGENT \
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+#include "config.h"
 
 typedef struct {
     char  *data;
     size_t len;
     size_t cap;
 } Buffer;
+
+/* GET / POST 的公共实现：body == NULL 就是 GET */
+static int http_request(const char *url, const char *body, const char *headers,
+                        HttpResponse *resp, long timeout_sec);
 
 static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
@@ -63,18 +63,23 @@ void http_global_cleanup(void)
     curl_global_cleanup();
 }
 
-int http_get_with_headers(const char *url, const char *headers,
-                          HttpResponse *resp, long timeout_sec)
+static int http_request(const char *url, const char *body, const char *headers,
+                        HttpResponse *resp, long timeout_sec)
 {
     Buffer            buf = {0};
     CURL             *curl;
     CURLcode          rc;
     struct curl_slist *list = NULL;
+    long              timeout;
 
     if (url == NULL || resp == NULL)
         return -1;
 
     memset(resp, 0, sizeof(*resp));
+
+    /* 每次调用都现取配置：ini 里写了就用，没写回落到内置默认
+     * （timeout_sec > 0 的调用方仍可单次覆盖） */
+    timeout = timeout_sec > 0 ? timeout_sec : config_http_timeout();
 
     curl = curl_easy_init();
     if (curl == NULL) {
@@ -88,11 +93,20 @@ int http_get_with_headers(const char *url, const char *headers,
 
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_sec > 0 ? timeout_sec : 15L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, (long)config_http_connect_timeout());
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+
+    if (config_proxy() != NULL)
+        curl_easy_setopt(curl, CURLOPT_PROXY, config_proxy());
 
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, FOLLOW_USER_AGENT);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, config_user_agent());
+
+    if (body != NULL) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
+    }
 
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, resp->error);
 
@@ -143,6 +157,18 @@ int http_get_with_headers(const char *url, const char *headers,
     }
 
     return 0;
+}
+
+int http_get_with_headers(const char *url, const char *headers,
+                          HttpResponse *resp, long timeout_sec)
+{
+    return http_request(url, NULL, headers, resp, timeout_sec);
+}
+
+int http_post_with_headers(const char *url, const char *body, const char *headers,
+                           HttpResponse *resp, long timeout_sec)
+{
+    return http_request(url, body, headers, resp, timeout_sec);
 }
 
 int http_get(const char *url, HttpResponse *resp, long timeout_sec)

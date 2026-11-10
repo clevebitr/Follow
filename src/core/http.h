@@ -32,17 +32,26 @@ void http_global_cleanup(void);
 
 /*
  * 同步 GET。成功返回 0（此时仍要看 resp->status 判断 2xx/4xx/5xx）。
- * timeout_sec <= 0 时使用默认 15 秒。
+ * timeout_sec <= 0 时用 [net] timeout（默认 15 秒）。
+ * UA / 建连超时均取自 [net] 配置，未配置时用 config.h 里的内置值。
  * 无论成功失败，resp 里的 body（可能为 ""）都要用 http_response_free 释放。
  */
 int  http_get(const char *url, HttpResponse *resp, long timeout_sec);
 
 /*
  * 同上，但可以带额外请求头（每行一个 "Key: Value"，CRLF 或 LF 分隔）。
- * B 站这类接口不带 Referer/UA 会被挡。headers 可以为 NULL。
+ * B 站 / YouTube 这类接口不带 Referer/UA 会被挡。headers 可以为 NULL。
  */
 int  http_get_with_headers(const char *url, const char *headers,
                            HttpResponse *resp, long timeout_sec);
+
+/*
+ * 同步 POST（body 是原始字节，Content-Type 由 headers 里自己给）。
+ * YouTube 的 InnerTube 接口只收 POST + JSON，所以单开一个。
+ * 其余语义和返回值同 http_get_with_headers。
+ */
+int  http_post_with_headers(const char *url, const char *body, const char *headers,
+                            HttpResponse *resp, long timeout_sec);
 
 /* 释放 body 并把结构体清零，可重复调用 */
 void http_response_free(HttpResponse *resp);

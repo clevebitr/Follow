@@ -15,6 +15,7 @@
 #include "config.h"
 #include "platform.h"
 #include "source.h"
+#include "youtube.h"
 
 int source_resolve(const char *uri, MediaSource *out, gchar **error)
 {
@@ -26,6 +27,7 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
     out->title    = NULL;
     out->artist   = NULL;
     out->resolved = FALSE;
+    out->ranged   = FALSE;
 
     if (error != NULL)
         *error = NULL;
@@ -38,6 +40,37 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
 
     if (!config_is_remote(uri)) {
         out->url = g_strdup(uri);
+        return 0;
+    }
+
+    if (platform_from_url(uri) == PLATFORM_YOUTUBE) {
+        gchar *audio_url = NULL;
+        gchar *title = NULL;
+        gchar *artist = NULL;
+        gchar *why = NULL;
+
+        if (youtube_resolve(uri, &audio_url, &title, &artist, &why) != 0) {
+            if (error != NULL)
+                *error = why != NULL ? why : g_strdup("YouTube 解析失败");
+            else
+                g_free(why);
+
+            g_free(audio_url);
+            g_free(title);
+            g_free(artist);
+            return -1;
+        }
+
+        g_free(why);
+
+        out->url      = audio_url;
+        out->headers  = youtube_request_headers();
+        out->title    = title;
+        out->artist   = artist;
+        out->resolved = TRUE;
+        out->ranged   = TRUE;   /* googlevideo 只认定长 Range 请求 */
+
+        g_message("source: youtube -> %s (%s)", title != NULL ? title : "?", audio_url);
         return 0;
     }
 

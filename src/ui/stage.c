@@ -54,6 +54,11 @@ static const gchar *subtitle_line(Rgba *color)
         return error;
     }
 
+    if (app.source_error != NULL && *app.source_error != '\0') {
+        *color = col_error;
+        return app.source_error;
+    }
+
     if (app.lyrics_pending) {
         *color = WHITE(0.40);
         return "LYRICS...";

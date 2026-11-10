@@ -64,6 +64,7 @@ struct _Media {
     GMutex     cmd_lock;
     gchar     *cmd_url;
     gchar     *cmd_headers;
+    int        cmd_ranged;      /* 原子：1 = 用定长 Range 分块读（YouTube） */
 
     gchar      error[256];
 
@@ -74,8 +75,10 @@ struct _Media {
 int  media_init(Media *m);
 void media_clear(Media *m);
 
-/* 开始播放：url 可以是本地路径或 http(s)，headers 可为 NULL */
-int  media_play(Media *m, const char *url, const char *headers);
+/* 开始播放：url 可以是本地路径或 http(s)，headers 可为 NULL。
+ * ranged = TRUE 时不走 FFmpeg 的 http，改用 httpstream（定长 Range + libcurl）：
+ * googlevideo 会拒绝 FFmpeg 那种开放式 Range: bytes=0-，只能自己分块取。 */
+int  media_play(Media *m, const char *url, const char *headers, gboolean ranged);
 
 int  media_pause(Media *m);
 int  media_continue(Media *m);

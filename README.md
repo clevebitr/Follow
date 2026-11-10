@@ -16,7 +16,8 @@
 ### 播放
 
 - 本地文件、`http(s)` 直链、HLS 都能放（FFmpeg 解码）
-- **Bilibili 链接直接粘**：`BV` 号 / `av` 号 / `b23.tv` 短链会自动解析成音频流
+- **Bilibili / YouTube 链接直接粘**：`BV` 号、`av` 号、`b23.tv` 短链、`youtu.be`、
+  `watch?v=` / `shorts` / `music.youtube.com` 都会自动解析出音频轨（YouTube 需要代理）
 - 播放 / 暂停 / 停止 / 拖动进度 / 上一首下一首
 - 循环（关 · 列表 · 单曲）、随机（带历史，「上一首」真的能回去）、自动续播
 - 全键盘操作，没有按钮也没有菜单
@@ -100,6 +101,15 @@ text=Follow                       # 时钟上方那行副标题，可被单曲 n
 [qrcode]
 link=https://live.bilibili.com/1840990819
 
+[cache]
+#dir=cache                        # 缓存目录，默认 <用户缓存>/follow；支持 ~ 和相对路径
+
+[net]
+#user_agent=Mozilla/5.0 ...       # 留空就用内置的浏览器 UA
+#timeout=15                       # 整次请求超时（秒）
+#connect_timeout=5                # 建连超时（秒）
+#proxy=http://127.0.0.1:7890      # 代理：YouTube 必填，curl 和 FFmpeg 都走它
+
 [audio1]
 link=src/assets/xxx.mp3     # 本地路径或 http(s) URL
 title=耳朵
@@ -111,8 +121,20 @@ lrc=netease:李荣浩 耳朵            # 本地 .lrc / netease:... / qq:...
 #note=STAFF CREDITS               # 覆盖 [note] text
 
 [audio2]
-link=https://www.bilibili.com/video/BV1GJ411x7h7    # 页面链接会自动解析
+link=https://www.bilibili.com/video/BV1GJ411x7h7    # B 站页面链接会自动解析
+
+[audio3]
+link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 页面链接同样会解析
+#page=                                             # 二维码目标，默认空则不显示
 ```
+
+> YouTube 那一路走的是 InnerTube 接口，**国内直连不可用**，需要先在 `[net] proxy` 里填代理。
+> 另外 YouTube 会按出口 IP 判人机验证：机房 IP / 公共代理常被挡（界面上会提示
+> 「YouTube 要人机验证」），换成住宅 IP 或换个节点即可。
+>
+> 播放这一路也不走 FFmpeg 自带的 http：googlevideo 现在只接受**定长 Range** 请求，
+> FFmpeg 默认发的开放式 `Range: bytes=0-` 会被 403。所以 YouTube 音源改由
+> `src/core/httpstream.c` 用 libcurl 按 2MB 分块拉流再喂给解码器，seek 也仍然正确。
 
 `[audioN]` 按 N 排序就是播放列表，任何一项缺失都会回落到默认值，ini 写坏了也能启动。完整的键说明见下方「配置项」。
 
@@ -126,7 +148,7 @@ link=https://www.bilibili.com/video/BV1GJ411x7h7    # 页面链接会自动解�
 | cairo + Pango | 整屏绘制与排版 |
 | miniaudio | 音频输出设备（已内置，header-only） |
 | FFmpeg | 本地 / 网络音频解码 |
-| libcurl + JSON-GLib | 网络请求与接口解析 |
+| libcurl + JSON-GLib | 网络请求与接口解析（B 站 / YouTube / 歌词源）、YouTube 分块拉流 |
 | libqrencode + librsvg | 二维码与品牌矢量图标 |
 
 ---
@@ -136,7 +158,9 @@ link=https://www.bilibili.com/video/BV1GJ411x7h7    # 页面链接会自动解�
 **本项目仅供学习与技术研究使用。**
 
 - 作者**不提供、不托管、不分发**任何音视频内容。播放的内容全部由使用者自己提供或指定，版权归各自权利人所有。
-- `src/core/bilibili.c` 使用 B 站网页端的**非公开接口**并附带 Referer 头来获取音频流地址，`src/core/lyricsrc.c` 同理访问网易云 / QQ 音乐。这些做法**可能违反对应平台的服务条款**，接口也可能随时失效。请仅用于个人学习，不要用于分发、转售或商业用途，也不要下载 / 保存 / 二次分发内容。
+- `src/core/bilibili.c` 使用 B 站网页端的**非公开接口**并附带 Referer 头来获取音频流地址；
+  `src/core/youtube.c` 调用 YouTube 的 InnerTube 接口并伪装成官方客户端；
+  `src/core/lyricsrc.c` 同理访问网易云 / QQ 音乐。这些做法**可能违反对应平台的服务条款**，接口也可能随时失效。请仅用于个人学习，不要用于分发、转售或商业用途，也不要下载 / 保存 / 二次分发内容。
 - 若需要合规使用，请走各平台官方开放接口，或直接使用你有权访问的音频直链（`http(s)` / HLS）——这条路径不涉及任何平台。
 - 使用者须自行遵守所在地法律法规与平台条款，**因使用本项目产生的一切后果由使用者自行承担**。
 
@@ -152,6 +176,8 @@ link=https://www.bilibili.com/video/BV1GJ411x7h7    # 页面链接会自动解�
 | `note` | `text` | 时钟上面那行副标题；空则这一行让给歌词 |
 | `playback` | `repeat` / `shuffle` | `off`/`all`（默认）/`one`，随机默认关 |
 | `qrcode` | `link` / `label` | 只对 `http(s)` 地址显示；`label` 默认取主机名 |
+| `cache` | `dir` | 歌词 / 封面 / B 站元数据 / 收听统计的落地目录，默认 `<用户缓存>/follow` |
+| `net` | `user_agent` / `timeout` / `connect_timeout` / `proxy` | 网络默认值；UA 留空用内置浏览器 UA，超时单位秒，`proxy` 同时作用于 curl 与 FFmpeg |
 | `audioN` | `link` | **必填**，空的组会被跳过 |
 | | `title` / `artist` / `note` / `pic` / `lrc` / `lrc_offset` / `page` / `platform` | 同上 |
 
@@ -168,10 +194,10 @@ src/models/  内置的 miniaudio.h
 
 ## Roadmap
 
-- [x] 网络音频：FFmpeg + Bilibili 解析（页面链接、`b23.tv`、直链、HLS）
+- [x] 网络音频：FFmpeg + Bilibili / YouTube 解析（页面链接、`b23.tv`、直链、HLS）
 - [x] 封面、歌词（本地 + 在线）、二维码、平台徽标
 - [x] 循环 / 随机 / 自动续播、收听统计与热力图
-- [ ] 更多音源解析（YouTube / SoundCloud）
+- [ ] 更多音源解析（SoundCloud）
 - [ ] 播放列表页（带撤销 / 重做）
 - [ ] 退出时把窗口尺寸写回 `config.ini`
 

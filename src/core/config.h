@@ -19,6 +19,14 @@
 #define WINDOW_TITLE  "Follow"
 #define QRCODE_LINK   "https://github.com/clevebitr"
 
+/* [net] 没配时的网络默认值。
+ * UA 用浏览器串：B 站这类接口会挡非浏览器 UA。 */
+#define HTTP_DEFAULT_USER_AGENT \
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+#define HTTP_DEFAULT_TIMEOUT         15   /* 整次请求，秒 */
+#define HTTP_DEFAULT_CONNECT_TIMEOUT 5    /* 建连，秒 */
+
 /* 一个曲目 = 配置里的一个 [audioN] 组。
  * link / pic / lrc 既可以是本地路径，也可以是 http(s) URL；
  * *_remote 是加载时算好的标志，省得每次再解析 scheme。
@@ -60,6 +68,16 @@ typedef struct {
     gint     repeat;        /* RepeatMode */
     gboolean shuffle;
 
+    /* [cache] 歌词 / 封面 / B 站元数据 / 收听统计的落地目录；
+     * NULL = <用户缓存目录>/follow */
+    gchar   *cache_dir;
+
+    /* [net] 网络请求默认值：UA 为 NULL、超时 <= 0 时用 config.h 里的内置值 */
+    gchar   *user_agent;
+    gchar   *proxy;             /* 形如 http://127.0.0.1:7890；NULL = 直连 */
+    gint     http_timeout;      /* 整次请求超时，秒 */
+    gint     connect_timeout;   /* 建连超时，秒 */
+
     /* [audio1], [audio2] ... 按数字顺序排好的曲目表 */
     AudioTrack *tracks;
     gsize       n_tracks;
@@ -92,6 +110,14 @@ gchar *config_track_label(const AudioTrack *track);
 
 /* uri 是不是 http/https 远程地址（没有 scheme 的按本地路径处理）。 */
 gboolean config_is_remote(const gchar *uri);
+
+/* 有效的网络参数：配置里没写就回落到内置默认（恒非 NULL / 恒 > 0） */
+const gchar *config_user_agent(void);
+gint         config_http_timeout(void);
+gint         config_http_connect_timeout(void);
+
+/* [net] proxy：没配置返回 NULL（直连）；空串也当没配 */
+const gchar *config_proxy(void);
 
 /* 把本地路径 / file:// URI 统一成文件系统路径，返回新分配的字符串。 */
 gchar *config_to_local_path(const gchar *uri);

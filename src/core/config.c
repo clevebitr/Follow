@@ -77,22 +77,30 @@ static gint compare_track_groups(gconstpointer a, gconstpointer b, gpointer data
 }
 
 
-static gint config_get_int(GKeyFile *kf, const gchar *group, const gchar *key,
-                           gint fallback)
+/* GKeyFile 不支持行内注释：`proxy = http://... ; 说明` 会把“; 说明”也算进值里，
+ * 结果就是代理地址非法、请求直接失败（表面上看就像“代理没生效”）。
+ * 这里统一砍掉值尾巴上的行内注释：只当 `;` / `#` 前面是空白、后面也是空白
+ * 或行尾时才当注释，所以 `Mozilla/4.0 (compatible; MSIE 6.0)` 这种不会被误伤。 */
+static void config_strip_inline_comment(gchar *value)
 {
-    g_autoptr(GError) error = NULL;
-    gint value = g_key_file_get_integer(kf, group, key, &error);
+    gchar *p;
 
-    return error ? fallback : value;
-}
+    if (value == NULL)
+        return;
 
-static gboolean config_get_bool(GKeyFile *kf, const gchar *group, const gchar *key,
-                                gboolean fallback)
-{
-    g_autoptr(GError) error = NULL;
-    gboolean value = g_key_file_get_boolean(kf, group, key, &error);
+    for (p = value; *p != '\0'; p++) {
+        if ((*p != ';' && *p != '#'))
+            continue;
+        if (p == value || !g_ascii_isspace(p[-1]))
+            continue;
+        if (p[1] != '\0' && !g_ascii_isspace(p[1]))
+            continue;
 
-    return error ? fallback : value;
+        *p = '\0';
+        break;
+    }
+
+    g_strstrip(value);
 }
 
 static gchar *config_get_string(GKeyFile *kf, const gchar *group, const gchar *key)
@@ -100,7 +108,50 @@ static gchar *config_get_string(GKeyFile *kf, const gchar *group, const gchar *k
     g_autoptr(GError) error = NULL;
     gchar *value = g_key_file_get_string(kf, group, key, &error);
 
-    return error ? NULL : value;
+    if (error != NULL)
+        return NULL;
+
+    config_strip_inline_comment(value);
+
+    return value;
+}
+
+/* 整数 / 布尔也先当字符串读，这样 `timeout = 15   ; 秒` 同样能用 */
+static gint config_get_int(GKeyFile *kf, const gchar *group, const gchar *key,
+                           gint fallback)
+{
+    g_autofree gchar *raw = config_get_string(kf, group, key);
+    gchar            *end = NULL;
+    gint64            value;
+
+    if (raw == NULL || *raw == '\0')
+        return fallback;
+
+    value = g_ascii_strtoll(raw, &end, 10);
+
+    if (end == raw || (end != NULL && *g_strstrip(end) != '\0'))
+        return fallback;
+
+    return (value < G_MININT || value > G_MAXINT) ? fallback : (gint)value;
+}
+
+static gboolean config_get_bool(GKeyFile *kf, const gchar *group, const gchar *key,
+                                gboolean fallback)
+{
+    g_autofree gchar *raw = config_get_string(kf, group, key);
+
+    if (raw == NULL || *raw == '\0')
+        return fallback;
+
+    if (g_ascii_strcasecmp(raw, "true") == 0 || g_ascii_strcasecmp(raw, "1") == 0 ||
+        g_ascii_strcasecmp(raw, "yes") == 0 || g_ascii_strcasecmp(raw, "on") == 0)
+        return TRUE;
+
+    if (g_ascii_strcasecmp(raw, "false") == 0 || g_ascii_strcasecmp(raw, "0") == 0 ||
+        g_ascii_strcasecmp(raw, "no") == 0 || g_ascii_strcasecmp(raw, "off") == 0)
+        return FALSE;
+
+    return fallback;
 }
 
 /* 歌词偏移：写毫秒或秒都行，也接受后缀。
@@ -170,6 +221,8 @@ static void config_reset(void)
     g_free(g_config.qrcode_link);
     g_free(g_config.qrcode_label);
     g_free(g_config.note);
+    g_free(g_config.cache_dir);
+    g_free(g_config.user_agent);
 
     g_config.width       = WINDOW_WIDTH;
     g_config.height      = WINDOW_HEIGHT;
@@ -180,6 +233,11 @@ static void config_reset(void)
     g_config.note        = NULL;
     g_config.repeat      = REPEAT_ALL;   /* 默认列表循环 */
     g_config.shuffle     = FALSE;
+    g_config.cache_dir   = NULL;         /* NULL = <用户缓存目录>/follow */
+    g_config.user_agent  = NULL;         /* NULL = 内置的浏览器 UA */
+    g_config.proxy       = NULL;         /* NULL = 直连 */
+    g_config.http_timeout    = 0;        /* 0 = HTTP_DEFAULT_TIMEOUT */
+    g_config.connect_timeout = 0;        /* 0 = HTTP_DEFAULT_CONNECT_TIMEOUT */
 }
 
 const APPconfig *config_get(void)
@@ -383,6 +441,33 @@ const APPconfig *config_load(const char *path)
         g_config.shuffle = config_get_bool(kf, "playback", "shuffle", g_config.shuffle);
     }
 
+    /* [cache] dir：缓存目录。支持 ~ 和相对路径，留空就用 <用户缓存>/follow */
+    {
+        g_autofree gchar *dir = config_get_string(kf, "cache", "dir");
+
+        g_free(g_config.cache_dir);
+        g_config.cache_dir = (dir != NULL && *dir != '\0') ? g_steal_pointer(&dir) : NULL;
+    }
+
+    /* [net]：UA 和两个超时；没写就用内置默认 */
+    {
+        g_autofree gchar *ua = config_get_string(kf, "net", "user_agent");
+
+        g_free(g_config.user_agent);
+        g_config.user_agent = (ua != NULL && *ua != '\0') ? g_steal_pointer(&ua) : NULL;
+
+        g_config.http_timeout    = config_get_int(kf, "net", "timeout", 0);
+        g_config.connect_timeout = config_get_int(kf, "net", "connect_timeout", 0);
+    }
+
+    /* [net] proxy：YouTube 这类在国内需要代理，curl 和 FFmpeg 都用它 */
+    {
+        g_autofree gchar *proxy = config_get_string(kf, "net", "proxy");
+
+        g_free(g_config.proxy);
+        g_config.proxy = (proxy != NULL && *proxy != '\0') ? g_steal_pointer(&proxy) : NULL;
+    }
+
     config_load_tracks(kf, &g_config);
 
     g_debug("config: %" G_GSIZE_FORMAT " track(s) loaded", g_config.n_tracks);
@@ -398,7 +483,41 @@ void config_free(void)
     g_free(g_config.qrcode_link);
     g_free(g_config.qrcode_label);
     g_free(g_config.note);
+    g_free(g_config.cache_dir);
+    g_free(g_config.user_agent);
+    g_free(g_config.proxy);
 
     g_config = (APPconfig){ 0 };
     g_loaded = FALSE;
+}
+
+const gchar *config_user_agent(void)
+{
+    const APPconfig *cfg = config_get();
+
+    if (cfg->user_agent != NULL && *cfg->user_agent != '\0')
+        return cfg->user_agent;
+
+    return HTTP_DEFAULT_USER_AGENT;
+}
+
+gint config_http_timeout(void)
+{
+    gint seconds = config_get()->http_timeout;
+
+    return seconds > 0 ? seconds : HTTP_DEFAULT_TIMEOUT;
+}
+
+gint config_http_connect_timeout(void)
+{
+    gint seconds = config_get()->connect_timeout;
+
+    return seconds > 0 ? seconds : HTTP_DEFAULT_CONNECT_TIMEOUT;
+}
+
+const gchar *config_proxy(void)
+{
+    const APPconfig *cfg = config_get();
+
+    return (cfg->proxy != NULL && *cfg->proxy != '\0') ? cfg->proxy : NULL;
 }

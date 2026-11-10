@@ -350,6 +350,16 @@ static void startup(GtkApplication *app_, gpointer user_data)
 
     config_load(CONFIG_PATH);
 
+    /* [net] proxy 同时也交给 FFmpeg：curl 走 CURLOPT_PROXY，
+     * 解码器（avformat 的 http）只认环境变量，两边都指到同一个代理。 */
+    if (config_proxy() != NULL) {
+        g_setenv("http_proxy",  config_proxy(), TRUE);
+        g_setenv("https_proxy", config_proxy(), TRUE);
+        g_setenv("HTTP_PROXY",  config_proxy(), TRUE);
+        g_setenv("HTTPS_PROXY", config_proxy(), TRUE);
+        g_message("net: proxy = %s", config_proxy());
+    }
+
     stats_init(&app.stats);
     stats_load(&app.stats);
 

@@ -61,6 +61,7 @@ typedef struct {
     guint    resolve_gen;         /* 丢弃过期的网络解析结果 */
     gchar   *resolved_title;      /* 网络来源解析出的曲名 */
     gchar   *resolved_artist;
+    gchar   *source_error;        /* 网络解析失败的原因（显示在歌词那行） */
 
     /* 歌词 */
     Lyrics  *lyrics;

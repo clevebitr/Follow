@@ -24,6 +24,8 @@
 
 #include "media.h"
 
+#include "httpstream.h"
+
 #define FOLLOW_UA \
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -35,6 +37,7 @@
 
 typedef struct {
     AVFormatContext *fmt;
+    AVIOContext     *pb;           /* 自己接的网络流（ranged 模式），可为 NULL */
     AVCodecContext  *dec;
     SwrContext      *swr;
     AVPacket        *pkt;
@@ -156,6 +159,7 @@ static void ff_close(FFMedia *ff)
     if (ff->pkt != NULL) av_packet_free(&ff->pkt);
     if (ff->dec != NULL) avcodec_free_context(&ff->dec);
     if (ff->fmt != NULL) avformat_close_input(&ff->fmt);
+    if (ff->pb != NULL) httpstream_avio_free(&ff->pb);
 
     g_free(ff->scratch);
     ff->scratch = NULL;
@@ -175,7 +179,8 @@ static void set_error(Media *m, const char *fmt, ...)
     va_end(ap);
 }
 
-static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers)
+static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers,
+                   gboolean ranged)
 {
     const AVCodec *codec = NULL;
     AVDictionary  *opts = NULL;
@@ -189,8 +194,38 @@ static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers)
     if (headers != NULL && *headers != '\0')
         av_dict_set(&opts, "headers", headers, 0);
 
-    result = avformat_open_input(&ff->fmt, url, NULL, &opts);
-    av_dict_free(&opts);
+    if (ranged) {
+        /* 自己接一个分块读的 AVIO：FFmpeg 原来的 http 会发 Range: bytes=0-，
+         * googlevideo 直接 403。 */
+        g_autofree gchar *why = NULL;
+
+        ff->pb = httpstream_avio_open(url, headers, &why);
+        if (ff->pb == NULL) {
+            set_error(m, "%s", why != NULL ? why : "网络流打不开");
+            av_dict_free(&opts);
+            ff_close(ff);
+            return -1;
+        }
+
+        ff->fmt = avformat_alloc_context();
+        if (ff->fmt == NULL) {
+            set_error(m, "分配 AVFormatContext 失败");
+            av_dict_free(&opts);
+            ff_close(ff);
+            return -1;
+        }
+
+        ff->fmt->pb    = ff->pb;
+        ff->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+
+        /* 已经在流里了，opts 对自定义 IO 没用，免得它去查 http 选项 */
+        av_dict_free(&opts);
+
+        result = avformat_open_input(&ff->fmt, NULL, NULL, NULL);
+    } else {
+        result = avformat_open_input(&ff->fmt, url, NULL, &opts);
+        av_dict_free(&opts);
+    }
 
     if (result < 0) {
         char buf[128] = {0};
@@ -437,8 +472,9 @@ static gpointer media_decode_thread(gpointer data)
 
         /* 1) 打开新地址 */
         if (__atomic_exchange_n(&m->cmd_load, 0, __ATOMIC_ACQ_REL)) {
-            gchar *url = NULL;
-            gchar *headers = NULL;
+            gchar    *url = NULL;
+            gchar    *headers = NULL;
+            gboolean  ranged;
 
             g_mutex_lock(&m->cmd_lock);
             url     = m->cmd_url;
@@ -446,6 +482,9 @@ static gpointer media_decode_thread(gpointer data)
             m->cmd_url     = NULL;
             m->cmd_headers = NULL;
             g_mutex_unlock(&m->cmd_lock);
+
+            ranged = __atomic_load_n(&m->cmd_ranged, __ATOMIC_ACQUIRE) != 0;
+            __atomic_store_n(&m->cmd_ranged, 0, __ATOMIC_RELEASE);
 
             ff_close(ff);
 
@@ -458,7 +497,7 @@ static gpointer media_decode_thread(gpointer data)
             __atomic_store_n(&m->cmd_seek, (ma_int64)-1, __ATOMIC_RELEASE);
             m->error[0] = '\0';
 
-            if (url != NULL && ff_open(ff, m, url, headers) == 0) {
+            if (url != NULL && ff_open(ff, m, url, headers, ranged) == 0) {
                 __atomic_store_n(&m->length, ff->length_frames, __ATOMIC_RELEASE);
                 __atomic_store_n(&m->has_stream, 1, __ATOMIC_RELEASE);
                 __atomic_store_n(&m->state, MEDIA_PLAYING, __ATOMIC_RELEASE);
@@ -570,7 +609,7 @@ int media_init(Media *m)
     return 0;
 }
 
-int media_play(Media *m, const char *url, const char *headers)
+int media_play(Media *m, const char *url, const char *headers, gboolean ranged)
 {
     if (m == NULL || !m->ready || url == NULL)
         return -1;
@@ -580,6 +619,7 @@ int media_play(Media *m, const char *url, const char *headers)
     g_free(m->cmd_headers);
     m->cmd_url     = g_strdup(url);
     m->cmd_headers = dup_headers_or_null(headers);
+    __atomic_store_n(&m->cmd_ranged, ranged ? 1 : 0, __ATOMIC_RELEASE);
     g_mutex_unlock(&m->cmd_lock);
 
     __atomic_store_n(&m->state, MEDIA_LOADING, __ATOMIC_RELEASE);
