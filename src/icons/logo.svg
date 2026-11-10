@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" width="128" height="64"
+     role="img" aria-label="Follow Player">
+  <g fill="none" stroke="#8a8f99" stroke-width="2.4"
+     stroke-linecap="round" stroke-linejoin="round">
+    
+    <!-- 左侧：F + 播放三角融合图标 (按比例缩小适配) -->
+    <path d="M 14 16 L 14 48" />
+    <path d="M 14 16 L 34 16" />
+    <path d="M 14 32 L 20 32" />
+    <path d="M 20 22 L 38 32 L 20 42 Z" />
+    
+    <!-- 右侧：艺术线条文字 "ollow" -->
+    <!-- o -->
+    <circle cx="54" cy="32" r="7" />
+    <!-- o -->
+    <circle cx="70" cy="32" r="7" />
+    <!-- l -->
+    <path d="M 84 16 L 84 48" />
+    <!-- o -->
+    <circle cx="98" cy="32" r="7" />
+    <!-- w (极简几何折线) -->
+    <path d="M 110 20 L 110 48 M 110 48 L 118 34 L 126 48 L 126 20" />
+    
+  </g>
+</svg>

@@ -3,7 +3,11 @@
  * author: clevebitr
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
-*/
+ *
+ * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
+ * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
+ * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ */
 
 #include <string.h>
 
@@ -14,6 +18,9 @@
 
 #define NETEASE_REFERER "Referer: https://music.163.com/\r\n"
 #define QQ_REFERER      "Referer: https://y.qq.com/\r\n"
+
+/* 与 bilibili.c 同理：网易云 / QQ 音乐的搜索接口同样是网页端私有接口，
+ * 只用来取回用户本来就能看到的歌词文本，不触碰音频流；仅供个人学习使用。 */
 
 
 static const char *obj_str(JsonObject *obj, const char *member)

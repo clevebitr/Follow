@@ -55,38 +55,84 @@ headerbar:backdrop .title {
   color: rgba(230, 230, 232, 0.12);
 }
 
-/* 窗口控制按钮： */
-headerbar windowcontrols button {
-  background-color: transparent;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-  color: rgba(230, 230, 232, 0.55);
-  min-width: 18px;
-  min-height: 18px;
-  padding: 0;
-  margin: 0 1px;
-}
-
-headerbar windowcontrols button > image {
-  background-color: transparent;
-  color: rgba(230, 230, 232, 0.55);
-  padding: 0;
+/* 窗口控制按钮（最小化 / 最大化 / 关闭）：
+ * 跟画面同一套观感 —— 平时只有图标，悬停时出现一枚 1px 细线圈出的圆角块，
+ * 关闭键悬停偏红，提醒这是不可逆操作。
+ *
+ * 注意：Adwaita 把 hover / active 的背景画在 `button > image` 上（30×30 的圆），
+ * 不是画在 button 上，所以只要覆盖 button 的话，悬停时会在按钮里冒出一个浅色圆。
+ * 这里把 image 一起接管。 */
+headerbar windowcontrols {
+  border-spacing: 2px;
   margin: 0;
 }
 
-headerbar windowcontrols button:hover {
-  background-color: rgba(230, 230, 232, 0.04);
-  color: #e6e6e8;
+headerbar windowcontrols button {
+  min-width: 32px;
+  min-height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  background-image: none;
+  box-shadow: none;
+  color: rgba(230, 230, 232, 0.42);
+  transition: color 120ms ease;
+}
+
+headerbar windowcontrols button > image {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  background-image: none;
+  box-shadow: none;
+  color: inherit;
+  -gtk-icon-size: 12px;
+  transition: background-color 120ms ease,
+              border-color 120ms ease,
+              color 120ms ease;
 }
 
 headerbar windowcontrols button:hover > image {
-  color: #e6e6e8;
+  background-color: rgba(230, 230, 232, 0.055);
+  border-color: rgba(230, 230, 232, 0.12);
+  color: rgba(238, 238, 242, 0.92);
 }
 
-headerbar windowcontrols button:active {
-  background-color: rgba(230, 230, 232, 0.08);
+headerbar windowcontrols button:active > image,
+headerbar windowcontrols button:checked > image {
+  background-color: rgba(230, 230, 232, 0.11);
+  border-color: rgba(230, 230, 232, 0.18);
   color: #ffffff;
+}
+
+/* 关闭键在最右：悬停时给一点红，破坏性动作要能一眼认出来 */
+headerbar windowcontrols.end > button:last-child:hover > image {
+  background-color: rgba(224, 96, 96, 0.14);
+  border-color: rgba(224, 96, 96, 0.42);
+  color: rgba(255, 168, 168, 0.95);
+}
+
+headerbar windowcontrols.end > button:last-child:active > image {
+  background-color: rgba(224, 96, 96, 0.22);
+  border-color: rgba(224, 96, 96, 0.55);
+  color: #ffd0d0;
+}
+
+/* 窗口失焦：整组再暗一档，不抢画面 */
+headerbar:backdrop windowcontrols button,
+headerbar windowcontrols button:backdrop {
+  color: rgba(230, 230, 232, 0.22);
+}
+
+headerbar:backdrop windowcontrols button > image,
+headerbar windowcontrols button:backdrop > image {
+  background: none;
+  border-color: transparent;
 }
 
 /* 内容层透明： */
