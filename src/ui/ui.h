@@ -36,6 +36,8 @@ typedef struct {
 typedef struct {
     /* GTK */
     GtkWidget *window;
+    GtkWidget *header_bar;   /* 无 CSD 外框时放在内容顶部 */
+    GtkWidget *header_title;
     GtkWidget *canvas;
     GtkWidget *wallgl;      /* 歌曲墙 GPU 层 */
     GtkWidget *chrome;      /* 歌曲墙表头 / 底栏 / 帮助页（透明层） */
@@ -127,5 +129,9 @@ void ui_animate(void);
 /* 根据「歌曲墙是否打开 / GL 是否可用」切换各图层的可见性，
  * 避免在墙全屏遮住画面时还去合成背景和主画布。 */
 void ui_sync_layers(void);
+
+/* 命令面板用：重新读取 src/config.ini / 切换全屏。 */
+void ui_reload_config(void);
+void ui_toggle_fullscreen(void);
 
 #endif /* FOLLOW_UI_H */

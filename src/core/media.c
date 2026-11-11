@@ -588,7 +588,15 @@ int media_init(Media *m)
 
     memset(m, 0, sizeof(*m));
 
+    m->volume = 1.0f;
+    g_strlcpy(m->output_name, "Default", sizeof(m->output_name));
+
     avformat_network_init();
+
+    if (ma_context_init(NULL, 0, NULL, &m->context) == MA_SUCCESS)
+        m->context_ready = 1;
+    else
+        g_warning("media: context init failed; output device selection disabled");
 
     config                     = ma_device_config_init(ma_device_type_playback);
     config.playback.format     = ma_format_f32;
@@ -597,10 +605,16 @@ int media_init(Media *m)
     config.dataCallback        = media_data_callback;
     config.pUserData           = m;
 
-    result = ma_device_init(NULL, &config, &m->device);
+    result = ma_device_init(m->context_ready ? &m->context : NULL,
+                            &config, &m->device);
     if (result != MA_SUCCESS) {
         fprintf(stderr, "media: device init failed: %s (%d)\n",
                 ma_result_description(result), (int)result);
+        if (m->context_ready) {
+            ma_context_uninit(&m->context);
+            m->context_ready = 0;
+        }
+
         return -2;
     }
 
@@ -620,6 +634,12 @@ int media_init(Media *m)
         fprintf(stderr, "media: device start failed: %s (%d)\n",
                 ma_result_description(result), (int)result);
         ma_device_uninit(&m->device);
+
+        if (m->context_ready) {
+            ma_context_uninit(&m->context);
+            m->context_ready = 0;
+        }
+
         g_mutex_clear(&m->cmd_lock);
         g_free(m->ring);
         g_free(m->scope);
@@ -628,6 +648,11 @@ int media_init(Media *m)
         return -3;
     }
 
+    ma_device_set_master_volume(&m->device, m->volume);
+    ma_device_get_name(&m->device, ma_device_type_playback,
+                       m->output_name, sizeof(m->output_name), NULL);
+
+    m->device_ok = 1;
     m->thread = g_thread_new("follow-decode", media_decode_thread, m);
     m->ready  = 1;
 
@@ -808,7 +833,15 @@ void media_clear(Media *m)
     g_thread_join(m->thread);
     m->thread = NULL;
 
-    ma_device_uninit(&m->device);
+    if (m->device_ok) {
+        ma_device_uninit(&m->device);
+        m->device_ok = 0;
+    }
+
+    if (m->context_ready) {
+        ma_context_uninit(&m->context);
+        m->context_ready = 0;
+    }
 
     g_mutex_clear(&m->cmd_lock);
     g_free(m->cmd_url);
@@ -821,4 +854,193 @@ void media_clear(Media *m)
     m->ready = 0;
 
     avformat_network_deinit();
+}
+
+/* 音量 / 输出设备 */
+
+void media_set_volume(Media *m, double volume)
+{
+    if (m == NULL)
+        return;
+
+    m->volume = (float)CLAMP(volume, 0.0, 1.0);
+
+    if (m->device_ok)
+        ma_device_set_master_volume(&m->device,
+                                    m->muted ? 0.0f : m->volume);
+}
+
+void media_set_muted(Media *m, gboolean muted)
+{
+    if (m == NULL)
+        return;
+
+    m->muted = muted ? 1 : 0;
+
+    if (m->device_ok)
+        ma_device_set_master_volume(&m->device,
+                                    m->muted ? 0.0f : m->volume);
+}
+
+gboolean media_muted(Media *m)
+{
+    return m != NULL && m->muted != 0;
+}
+
+double media_volume(Media *m)
+{
+    return m != NULL ? (double)m->volume : 1.0;
+}
+
+int media_output_devices(Media *m, GPtrArray *names)
+{
+    ma_device_info *playback = NULL;
+    ma_uint32       count    = 0;
+
+    if (m == NULL || names == NULL || !m->context_ready)
+        return 0;
+
+    if (ma_context_get_devices(&m->context, &playback, &count, NULL, NULL)
+        != MA_SUCCESS)
+        return 0;
+
+    for (ma_uint32 i = 0; i < count; i++) {
+        if (playback[i].name[0] == '\0')
+            continue;
+
+        g_ptr_array_add(names, g_strdup(playback[i].name));
+    }
+
+    return (int)names->len;
+}
+
+const char *media_output_device_name(Media *m)
+{
+    if (m == NULL || m->output_name[0] == '\0')
+        return "Default";
+
+    return m->output_name;
+}
+
+static ma_result media_try_open(Media *m, const ma_device_id *id,
+                                ma_device_config *config)
+{
+    ma_result result;
+
+    config->playback.pDeviceID = id;
+
+    result = ma_device_init(m->context_ready ? &m->context : NULL,
+                            config, &m->device);
+    if (result != MA_SUCCESS)
+        return result;
+
+    ma_device_set_master_volume(&m->device, m->muted ? 0.0f : m->volume);
+
+    result = ma_device_start(&m->device);
+    if (result != MA_SUCCESS) {
+        ma_device_uninit(&m->device);
+        return result;
+    }
+
+    m->device_ok = 1;
+    return MA_SUCCESS;
+}
+
+int media_set_output_device(Media *m, const char *name)
+{
+    ma_device_info    *playback = NULL;
+    ma_uint32          count    = 0;
+    const ma_device_id *want    = NULL;
+    ma_device_config   config;
+    ma_device_id       old_id;
+    ma_result          result;
+    gboolean           use_default;
+    gboolean           fell_back = FALSE;
+    const char        *label;
+
+    if (m == NULL || !m->ready)
+        return -1;
+
+    use_default = (name == NULL || *name == '\0' ||
+                   g_ascii_strcasecmp(name, "default") == 0);
+
+    if (!use_default) {
+        if (!m->context_ready)
+            return -2;
+
+        if (ma_context_get_devices(&m->context, &playback, &count, NULL, NULL)
+            != MA_SUCCESS)
+            return -2;
+
+        for (ma_uint32 i = 0; i < count; i++) {
+            if (g_ascii_strcasecmp(playback[i].name, name) == 0) {
+                want = &playback[i].id;
+                break;
+            }
+        }
+
+        if (want == NULL)
+            return -3;
+
+        if (m->device_ok &&
+            ma_device_id_equal(&m->device.playback.id, want))
+            return 0;
+    } else if (m->context_ready && m->device_ok) {
+        if (ma_context_get_devices(&m->context, &playback, &count, NULL, NULL)
+            == MA_SUCCESS) {
+            for (ma_uint32 i = 0; i < count; i++) {
+                if (playback[i].isDefault &&
+                    ma_device_id_equal(&m->device.playback.id,
+                                       &playback[i].id))
+                    return 0;
+            }
+        }
+    }
+
+    old_id = m->device.playback.id;
+
+    if (m->device_ok) {
+        ma_device_uninit(&m->device);
+        m->device_ok = 0;
+    }
+
+    config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format     = ma_format_f32;
+    config.playback.channels   = MEDIA_CHANNELS;
+    config.sampleRate          = m->sample_rate;
+    config.dataCallback        = media_data_callback;
+    config.pUserData           = m;
+
+    result = media_try_open(m, want, &config);
+    label  = use_default ? "Default" : name;
+
+    /* 指定的设备打不开：先退回系统默认，再退回原来的设备。 */
+    if (result != MA_SUCCESS && want != NULL) {
+        g_warning("media: cannot open output '%s': %s",
+                  name, ma_result_description(result));
+        fell_back = TRUE;
+        result = media_try_open(m, NULL, &config);
+        label  = "Default";
+    }
+
+    if (result != MA_SUCCESS) {
+        g_warning("media: default output failed: %s",
+                  ma_result_description(result));
+        fell_back = TRUE;
+        result = media_try_open(m, &old_id, &config);
+        label  = m->output_name[0] != '\0' ? m->output_name : "Default";
+    }
+
+    if (result != MA_SUCCESS) {
+        g_warning("media: no output device available");
+        return -4;
+    }
+
+    ma_device_get_name(&m->device, ma_device_type_playback,
+                       m->output_name, sizeof(m->output_name), NULL);
+
+    if (m->output_name[0] == '\0')
+        g_strlcpy(m->output_name, label, sizeof(m->output_name));
+
+    return fell_back ? 1 : 0;
 }

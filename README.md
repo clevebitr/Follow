@@ -20,6 +20,7 @@
   `watch?v=` / `shorts` / `music.youtube.com` 都会自动解析出音频轨（YouTube 需要代理）
 - 播放 / 暂停 / 停止 / 拖动进度 / 上一首下一首
 - 循环（关 · 列表 · 单曲）、随机（带历史，「上一首」真的能回去）、自动续播
+- **音量 / 静音 / 输出设备**：命令面板里调，音量、静音状态和输出设备都会记住
 - 全键盘操作，没有按钮也没有菜单
 
 ### 画面
@@ -62,11 +63,14 @@
   加色 sprite 里画；GL 失败或 `FOLLOW_BACKDROPGL=0` 时退回原来的 CPU 小纹理 + `GtkPicture`。
 - 封面解码、磁贴纹理生成都放到后台线程 / 低优先级队列；2K / 4K 上磁贴按设备像素渲染，
   打开墙不再同步卡住，快速拖动也不会临时排 Pango。
+- Windows 下窗口不再用 CSD 的 12px 阴影（DComp 会把透明阴影区画成黑边）：改成 1px 细边，
+  标题栏放在内容顶部用 `GtkWindowHandle` 拖动，四边有自定义缩放；DWM 的圆角 / 边框也关掉。
 - `FOLLOW_WALL_DEBUG=1` 会打印墙的帧率 / 帧时间 / 纹理上传数。
 
 > 开发调试：`FOLLOW_WALL_AUTO=1` 启动后自动开墙，`FOLLOW_EXIT_MS=8000` 定时退出，
 > `FOLLOW_WALL_AUTO_PAN=1` 持续平移，`FOLLOW_WALL_AUTO_CLOSE` / `FOLLOW_WALL_AUTO_REOPEN`
-> 用来复现「开墙 → 关墙 → 再开墙」的性能问题。
+> 用来复现「开墙 → 关墙 → 再开墙」的性能问题。`FOLLOW_PALETTE_AUTO=1` 自动打开命令面板，
+> `FOLLOW_PALETTE_QUERY=vol` 预填查询。
 
 ### 二维码
 
@@ -80,10 +84,25 @@
 - 近 12 周热力图，颜色取自当前封面
 - 按天记在 `<cache>/follow/stats.dat`，纯文本，随便改
 
+### 命令面板
+
+`Ctrl+Shift+P` 在右下角打开 VSCode 风格的命令框：输入框在底部，建议列表向上展开，
+`↑` / `↓` 选择、`Enter` 执行、`Esc` 或点空白处关闭。可以：
+
+- `Reload config.ini`：重新读取 `src/config.ini`（曲目、按键、可视化、动效）
+- `Audio volume...`：+5% / -5% / 50% / 100% / 静音
+- `Audio output...`：列出系统播放设备（含 System default），切换后立即生效
+- `Visualizer...`、`Toggle animations`、`Cycle repeat mode`、`Toggle shuffle`
+- `Lyrics offset` 调整 / 复位、开墙、帮助页、全屏、退出
+
+音量 / 静音 / 输出设备写在 `<cache>/follow/settings.ini`，和 `src/config.ini` 分开，
+所以重新加载 ini 不会把音量记忆冲掉。
+
 ### 快捷键
 
 | 按键 | 作用 |
 |---|---|
+| `Ctrl+Shift+P` | 打开 / 关闭命令面板 |
 | `Space` | 播放 / 暂停（还没放歌时从第一首开始） |
 | `←` / `→` | 后退 / 前进 5 秒（按住 `Shift` = 30 秒） |
 | `N` / `P` | 下一首 / 上一首 |

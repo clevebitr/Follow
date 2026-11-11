@@ -671,3 +671,8 @@ gboolean config_animations(void)
 {
     return config_get()->animations;
 }
+
+void config_set_animations(gboolean on)
+{
+    g_config.animations = on ? TRUE : FALSE;
+}

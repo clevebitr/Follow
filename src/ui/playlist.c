@@ -2379,6 +2379,32 @@ void playlist_draw(cairo_t *cr, double w, double h)
     }
 }
 
+void playlist_reload(void)
+{
+    tile_jobs_clear();
+    tile_cache_clear();
+    covercache_clear();
+    covercache_sync();
+
+    P.frame_dirty = TRUE;
+    P.hover_valid = FALSE;
+
+    if (P.open && config_get()->n_tracks > 0) {
+        double w, h;
+
+        view_size(&w, &h);
+        if (w > 0.0 && h > 0.0)
+            update_metrics(w, h);
+
+        P.focus_valid = FALSE;
+        focus_find_track(app.track >= 0 ? app.track : 0, 0, 0, 3);
+        warm_tile_cache(w, h);
+        playlist_request_frame();
+    }
+
+    ui_request_redraw();
+}
+
 void playlist_clear(void)
 {
     tile_jobs_clear();

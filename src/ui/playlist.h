@@ -58,5 +58,6 @@ gboolean playlist_click(double x, double y);
 void     playlist_hover(double x, double y);
 
 void     playlist_clear(void);
+void     playlist_reload(void);     /* 重新读取 config 后清缓存 / 重新聚焦 */
 
 #endif /* FOLLOW_PLAYLIST_H */

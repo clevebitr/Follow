@@ -155,6 +155,7 @@ guint64 config_cover_max_bytes(void);
 
 /* [ui] 动效总开关 */
 gboolean config_animations(void);
+void     config_set_animations(gboolean on);
 
 /* 把本地路径 / file:// URI 统一成文件系统路径，返回新分配的字符串。 */
 gchar *config_to_local_path(const gchar *uri);

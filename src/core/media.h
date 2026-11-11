@@ -12,6 +12,8 @@
 #ifndef MEDIA_H
 #define MEDIA_H
 
+#include <glib.h>
+
 #include "miniaudio.h"
 
 /* 播放层：miniaudio 输出设备 + ffmpeg 解码。
@@ -41,7 +43,13 @@ typedef struct _Media Media;
 
 struct _Media {
     ma_device  device;
+    ma_context context;
+    int        context_ready;
+    int        device_ok;
     ma_uint32  sample_rate;
+    float      volume;          /* 0..1，换设备后重新应用 */
+    int        muted;
+    char       output_name[256];/* 当前输出设备名，给命令行 / 设置记忆用 */
 
     /* 输出环形缓冲（f32 交织立体声） */
     float     *ring;
@@ -93,6 +101,20 @@ void media_stop(Media *m);
 double media_position(Media *m);
 double media_duration(Media *m);
 int    media_seek(Media *m, double seconds);
+
+/* 音量 / 输出设备 */
+void   media_set_volume(Media *m, double volume);   /* 0..1 */
+double media_volume(Media *m);
+void   media_set_muted(Media *m, gboolean muted);
+gboolean media_muted(Media *m);
+
+/* 枚举播放设备（GPtrArray 里是 g_strdup 的名字）；返回数量。 */
+int    media_output_devices(Media *m, GPtrArray *names);
+
+/* name = NULL / "default" 时切回系统默认设备。
+ * 成功返回 0；设备不存在或切换失败返回负值。 */
+int    media_set_output_device(Media *m, const char *name);
+const char *media_output_device_name(Media *m);
 
 int  media_is_playing(Media *m);
 int  media_is_paused(Media *m);

@@ -28,12 +28,17 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dwmapi.h>
 #endif
 
 #include <stdlib.h>
 #include <string.h>
 
 #include <gtk/gtk.h>
+
+#if defined(_WIN32)
+#include <gdk/win32/gdkwin32.h>
+#endif
 
 #include "backdrop.h"
 #include "backdropgl.h"
@@ -44,10 +49,12 @@
 #include "keymap.h"
 #include "lyricview.h"
 #include "media.h"
+#include "cmdbox.h"
 #include "player.h"
 #include "playlist.h"
 #include "qrcard.h"
 #include "resolvecache.h"
+#include "settings.h"
 #include "stage.h"
 #include "stats.h"
 #include "ui.h"
@@ -75,6 +82,53 @@ static gboolean on_tick(gpointer data);
 static gboolean on_anim_tick(gpointer data);
 
 /* clock 100ms */
+#if defined(_WIN32)
+/* Windows 11 默认给每个窗口画 1px 边框和圆角。应用自己已经是
+ * 无边框 CSD，这层 DWM 边会让外圈比之前粗，去掉它并保持直角。 */
+static void apply_window_edge(GtkWidget *window)
+{
+    GdkSurface *surface;
+    HWND        hwnd;
+
+    if (window == NULL)
+        return;
+
+    surface = gtk_native_get_surface(gtk_widget_get_native(window));
+    if (surface == NULL)
+        return;
+
+    hwnd = (HWND)gdk_win32_surface_get_handle(surface);
+    if (hwnd == NULL)
+        return;
+
+    {
+        COLORREF border = DWMWA_COLOR_NONE;
+        DWORD    corner = DWMWCP_DONOTROUND;
+        DWORD    nc     = DWMNCRP_DISABLED;
+
+        DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                              &corner, sizeof(corner));
+        /* 透明阴影区在 DComp 下会被画成黑边，直接关掉非客户区渲染。 */
+        DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY,
+                              &nc, sizeof(nc));
+    }
+}
+
+static gboolean apply_window_edge_idle(gpointer data)
+{
+    apply_window_edge(GTK_WIDGET(data));
+    return G_SOURCE_REMOVE;
+}
+
+static void on_window_realize(GtkWidget *widget, gpointer data)
+{
+    (void)data;
+
+    apply_window_edge(widget);
+}
+#endif
+
 static void track_listening_time(gboolean playing)
 {
     gint64 now_us;
@@ -271,7 +325,7 @@ static gboolean on_tick(gpointer data)
 }
 
 /* keyboard */
-static void toggle_fullscreen(void)
+void ui_toggle_fullscreen(void)
 {
     GtkWindow *window = GTK_WINDOW(app.window);
 
@@ -279,6 +333,65 @@ static void toggle_fullscreen(void)
         gtk_window_unfullscreen(window);
     else
         gtk_window_fullscreen(window);
+}
+
+void ui_reload_config(void)
+{
+    const APPconfig  *cfg;
+    const AudioTrack *old_track = NULL;
+    g_autofree gchar *old_pic   = NULL;
+    gint              track     = app.track;
+
+    if (track >= 0 && config_get()->n_tracks > 0)
+        old_track = config_track_at(config_get(), track);
+
+    if (old_track != NULL)
+        old_pic = g_strdup(old_track->pic);
+
+    cfg = config_load(CONFIG_PATH);
+
+    keymap_init();
+    viz_configure(config_viz_effect(), config_viz_particles(), config_viz_gain());
+
+    app.repeat  = cfg->repeat;
+    app.shuffle = cfg->shuffle;
+
+    playlist_reload();
+
+    if (track >= 0 && (gsize)track < cfg->n_tracks) {
+        const AudioTrack *now = config_track_at(cfg, (gsize)track);
+
+        if (now != NULL) {
+            if (g_strcmp0(old_pic, now->pic) != 0)
+                cover_set(now);
+
+            qrcard_update(now);
+        }
+    } else if (track >= 0) {
+        player_stop();
+        app.track = -1;
+
+        if (cfg->n_tracks > 0) {
+            const AudioTrack *first = config_track_at(cfg, 0);
+
+            cover_set(first);
+            qrcard_update(first);
+        } else {
+            cover_set(NULL);
+            qrcard_update(NULL);
+        }
+    } else if (cfg->n_tracks > 0) {
+        qrcard_update(config_track_at(cfg, 0));
+    }
+
+    player_update_window_title();
+
+    app.chrome_dirty = TRUE;
+    ui_request_redraw();
+    ui_animate();
+
+    g_message("config: reloaded %s (%" G_GSIZE_FORMAT " tracks)",
+              CONFIG_PATH, cfg->n_tracks);
 }
 
 static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
@@ -290,6 +403,33 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)controller;
     (void)keycode;
     (void)data;
+
+    {
+        const gboolean ctrl_shift_p =
+            (state & GDK_CONTROL_MASK) != 0 &&
+            (state & GDK_SHIFT_MASK) != 0 &&
+            (keyval == GDK_KEY_P || keyval == GDK_KEY_p);
+
+        if (palette_is_open()) {
+            if (ctrl_shift_p) {
+                palette_close();
+                return TRUE;
+            }
+
+            if (keyval == GDK_KEY_Escape) {
+                palette_close();
+                return TRUE;
+            }
+
+            /* 其他按键留给输入框，不要触发全局快捷键。 */
+            return FALSE;
+        }
+
+        if (ctrl_shift_p) {
+            palette_open();
+            return TRUE;
+        }
+    }
 
     /* 快捷键页：只认帮助 / 返回 / 退出，其他键一律吞掉 */
     if (app.help) {
@@ -420,7 +560,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         return TRUE;
     }
     if (keymap_match(KEY_FULLSCREEN, keyval, state)) {
-        toggle_fullscreen();
+        ui_toggle_fullscreen();
         return TRUE;
     }
     if (keymap_match(KEY_PLAYLIST, keyval, state)) {
@@ -494,6 +634,19 @@ static void on_canvas_motion(GtkEventControllerMotion *controller,
     playlist_hover(x, y);
 }
 
+static void on_window_clicked(GtkGestureClick *gesture, int n_press,
+                              double x, double y, gpointer data)
+{
+    (void)gesture;
+    (void)n_press;
+    (void)data;
+
+    if (palette_is_open() && !palette_contains(x, y)) {
+        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+        palette_close();
+    }
+}
+
 static gboolean on_canvas_scroll(GtkEventControllerScroll *controller,
                                  double dx, double dy, gpointer data)
 {
@@ -554,6 +707,8 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
         app.anim_id = 0;
     }
 
+    app.header_bar = NULL;
+    app.header_title = NULL;
     app.canvas     = NULL;
     app.chrome     = NULL;
     app.wallgl     = NULL;
@@ -562,6 +717,24 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
 }
 
 static gboolean debug_open_wall(gpointer data);
+
+static gboolean debug_open_palette(gpointer data)
+{
+    const gchar *query = g_getenv("FOLLOW_PALETTE_QUERY");
+
+    (void)data;
+
+    palette_open_query(query);
+
+    {
+        const gchar *steps = g_getenv("FOLLOW_PALETTE_STEPS");
+
+        if (steps != NULL)
+            palette_debug_steps(steps);
+    }
+
+    return G_SOURCE_REMOVE;
+}
 
 static gboolean debug_close_wall(gpointer data)
 {
@@ -630,6 +803,224 @@ static gboolean debug_pan_start(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+static void on_fullscreen_changed(GObject *object, GParamSpec *pspec,
+                                  gpointer data)
+{
+    GtkWidget *handle = data;
+
+    (void)pspec;
+
+    if (handle != NULL) {
+        gboolean fullscreen = gtk_window_is_fullscreen(GTK_WINDOW(object));
+        GtkWidget *root = gtk_widget_get_parent(handle);
+
+        gtk_widget_set_visible(handle, !fullscreen);
+
+        if (root != NULL) {
+            if (fullscreen)
+                gtk_widget_remove_css_class(root, "window-frame");
+            else
+                gtk_widget_add_css_class(root, "window-frame");
+        }
+    }
+}
+
+#if !defined(_WIN32)
+static void on_window_resize_press(GtkGestureClick *gesture, int n_press,
+                                   double x, double y, gpointer data)
+{
+    GtkWidget     *window = app.window;
+    int            w, h;
+    const int      edge = 5;
+    GdkSurfaceEdge e = (GdkSurfaceEdge)-1;
+    GdkSurface    *surface;
+    GdkDevice     *device;
+
+    (void)n_press;
+    (void)data;
+
+    if (window == NULL)
+        return;
+
+    w = gtk_widget_get_width(window);
+    h = gtk_widget_get_height(window);
+
+    if (x < 0 || y < 0 || x > w || y > h)
+        return;
+
+    if (x <= edge)
+        e = (y <= edge) ? GDK_SURFACE_EDGE_NORTH_WEST :
+            (y >= h - edge) ? GDK_SURFACE_EDGE_SOUTH_WEST :
+            GDK_SURFACE_EDGE_WEST;
+    else if (x >= w - edge)
+        e = (y <= edge) ? GDK_SURFACE_EDGE_NORTH_EAST :
+            (y >= h - edge) ? GDK_SURFACE_EDGE_SOUTH_EAST :
+            GDK_SURFACE_EDGE_EAST;
+    else if (y <= edge)
+        e = GDK_SURFACE_EDGE_NORTH;
+    else if (y >= h - edge)
+        e = GDK_SURFACE_EDGE_SOUTH;
+    else
+        return;
+
+    surface = gtk_native_get_surface(gtk_widget_get_native(window));
+    device  = gtk_gesture_get_device(GTK_GESTURE(gesture));
+
+    if (surface == NULL || device == NULL)
+        return;
+
+    gdk_toplevel_begin_resize(
+        GDK_TOPLEVEL(surface), e, device, 1, x, y,
+        gtk_event_controller_get_current_event_time(
+            GTK_EVENT_CONTROLLER(gesture)));
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+#endif
+
+#if defined(_WIN32)
+typedef struct {
+    int  mode;      /* 1 = move, 2 = resize */
+    int  edges;     /* 1 N, 2 S, 4 W, 8 E */
+    RECT start;
+} WindowDrag;
+
+static WindowDrag g_window_drag;
+
+static HWND window_hwnd(void)
+{
+    GdkSurface *surface;
+
+    if (app.window == NULL)
+        return NULL;
+
+    surface = gtk_native_get_surface(gtk_widget_get_native(app.window));
+    if (surface == NULL)
+        return NULL;
+
+    return (HWND)gdk_win32_surface_get_handle(surface);
+}
+
+static void win_drag_begin(GtkGestureDrag *gesture, double sx, double sy,
+                           gpointer data)
+{
+    GtkWidget      *window = app.window;
+    GtkWidget      *picked;
+    GtkWidget      *handle;
+    graphene_rect_t bounds;
+    HWND            hwnd;
+    int             w, h;
+    const int       edge = 5;
+
+    (void)data;
+
+    g_window_drag.mode  = 0;
+    g_window_drag.edges = 0;
+
+    if (window == NULL)
+        return;
+
+    w = gtk_widget_get_width(window);
+    h = gtk_widget_get_height(window);
+
+    picked = gtk_widget_pick(window, sx, sy, GTK_PICK_DEFAULT);
+    if (picked != NULL &&
+        gtk_widget_get_ancestor(picked, GTK_TYPE_BUTTON) != NULL)
+        return;
+
+    if (sx <= edge)             g_window_drag.edges |= 4;
+    if (sx >= w - edge)         g_window_drag.edges |= 8;
+    if (sy <= edge)             g_window_drag.edges |= 1;
+    if (sy >= h - edge)         g_window_drag.edges |= 2;
+
+    if (g_window_drag.edges != 0) {
+        g_window_drag.mode = 2;
+    } else {
+        handle = app.header_bar != NULL ? gtk_widget_get_parent(app.header_bar)
+                                        : NULL;
+
+        if (handle != NULL &&
+            gtk_widget_compute_bounds(handle, window, &bounds) &&
+            sy >= bounds.origin.y &&
+            sy <= bounds.origin.y + bounds.size.height)
+            g_window_drag.mode = 1;
+    }
+
+    if (g_window_drag.mode == 0)
+        return;
+
+    hwnd = window_hwnd();
+    if (hwnd == NULL) {
+        g_window_drag.mode = 0;
+        return;
+    }
+
+    GetWindowRect(hwnd, &g_window_drag.start);
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+
+static void win_drag_update(GtkGestureDrag *gesture, double ox, double oy,
+                            gpointer data)
+{
+    HWND hwnd;
+    int  x, y, w, h;
+    const int min_w = 640;
+    const int min_h = 360;
+
+    (void)gesture;
+    (void)data;
+
+    if (g_window_drag.mode == 0)
+        return;
+
+    hwnd = window_hwnd();
+    if (hwnd == NULL)
+        return;
+
+    x = g_window_drag.start.left;
+    y = g_window_drag.start.top;
+    w = g_window_drag.start.right  - g_window_drag.start.left;
+    h = g_window_drag.start.bottom - g_window_drag.start.top;
+
+    if (g_window_drag.mode == 1) {
+        SetWindowPos(hwnd, NULL, x + (int)ox, y + (int)oy, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+
+    if (g_window_drag.edges & 4) { x += (int)ox; w -= (int)ox; }
+    if (g_window_drag.edges & 8) { w += (int)ox; }
+    if (g_window_drag.edges & 1) { y += (int)oy; h -= (int)oy; }
+    if (g_window_drag.edges & 2) { h += (int)oy; }
+
+    if (w < min_w) {
+        if (g_window_drag.edges & 4)
+            x -= min_w - w;
+        w = min_w;
+    }
+
+    if (h < min_h) {
+        if (g_window_drag.edges & 1)
+            y -= min_h - h;
+        h = min_h;
+    }
+
+    SetWindowPos(hwnd, NULL, x, y, w, h,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+static void win_drag_end(GtkGestureDrag *gesture, double ox, double oy,
+                         gpointer data)
+{
+    (void)gesture;
+    (void)ox;
+    (void)oy;
+    (void)data;
+
+    g_window_drag.mode  = 0;
+    g_window_drag.edges = 0;
+}
+#endif
+
 static void activate(GtkApplication *app_, gpointer user_data)
 {
     const APPconfig    *cfg = config_get();
@@ -645,7 +1036,10 @@ static void activate(GtkApplication *app_, gpointer user_data)
     app.window = window;
 
     header_bar = gtk_header_bar_new();
-    gtk_window_set_titlebar(GTK_WINDOW(window), header_bar);
+    app.header_bar = header_bar;
+    app.header_title = gtk_label_new(cfg->title);
+    gtk_widget_add_css_class(app.header_title, "title");
+    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header_bar), app.header_title);
     gtk_window_set_title(GTK_WINDOW(window), cfg->title);
     gtk_window_set_default_size(GTK_WINDOW(window), cfg->width, cfg->height);
 
@@ -692,8 +1086,70 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.canvas);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.wallgl);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.chrome);
-    gtk_window_set_child(GTK_WINDOW(window), overlay);
+
+    /* 命令面板放最上层，右下角；列表在输入框上方，向上展开。 */
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), palette_new());
+
+    {
+        GtkWidget *root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        GtkWidget *handle   = gtk_window_handle_new();
+
+        gtk_window_handle_set_child(GTK_WINDOW_HANDLE(handle), header_bar);
+        gtk_widget_set_hexpand(handle, TRUE);
+        gtk_widget_set_hexpand(root_box, TRUE);
+        gtk_widget_set_vexpand(root_box, TRUE);
+        gtk_widget_set_hexpand(overlay, TRUE);
+        gtk_widget_set_vexpand(overlay, TRUE);
+        gtk_widget_add_css_class(root_box, "window-frame");
+
+        gtk_box_append(GTK_BOX(root_box), handle);
+        gtk_box_append(GTK_BOX(root_box), overlay);
+
+        gtk_window_set_child(GTK_WINDOW(window), root_box);
+        /* CSD 的 12px 阴影区在 DComp 下会变成黑边，直接去掉外框。 */
+        gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
+
+        gtk_widget_set_visible(handle,
+                               !gtk_window_is_fullscreen(GTK_WINDOW(window)));
+        g_signal_connect(window, "notify::fullscreened",
+                         G_CALLBACK(on_fullscreen_changed), handle);
+    }
+
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
+
+#if defined(_WIN32)
+    {
+        GtkGesture *drag = gtk_gesture_drag_new();
+
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag),
+                                      GDK_BUTTON_PRIMARY);
+        gtk_event_controller_set_propagation_phase(
+            GTK_EVENT_CONTROLLER(drag), GTK_PHASE_CAPTURE);
+        g_signal_connect(drag, "drag-begin",
+                         G_CALLBACK(win_drag_begin), NULL);
+        g_signal_connect(drag, "drag-update",
+                         G_CALLBACK(win_drag_update), NULL);
+        g_signal_connect(drag, "drag-end",
+                         G_CALLBACK(win_drag_end), NULL);
+        gtk_widget_add_controller(window, GTK_EVENT_CONTROLLER(drag));
+    }
+#else
+    {
+        GtkGesture *resize = gtk_gesture_click_new();
+
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(resize),
+                                      GDK_BUTTON_PRIMARY);
+        gtk_event_controller_set_propagation_phase(
+            GTK_EVENT_CONTROLLER(resize), GTK_PHASE_CAPTURE);
+        g_signal_connect(resize, "pressed",
+                         G_CALLBACK(on_window_resize_press), NULL);
+        gtk_widget_add_controller(window, GTK_EVENT_CONTROLLER(resize));
+    }
+#endif
+
+#if defined(_WIN32)
+    g_signal_connect(window, "realize", G_CALLBACK(on_window_realize), NULL);
+#endif
 
     keys = gtk_event_controller_key_new();
     g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key_pressed), NULL);
@@ -701,6 +1157,15 @@ static void activate(GtkApplication *app_, gpointer user_data)
 
     attach_wall_input(app.canvas);
     attach_wall_input(app.chrome);
+
+    {
+        GtkGesture *click = gtk_gesture_click_new();
+
+        gtk_event_controller_set_propagation_phase(
+            GTK_EVENT_CONTROLLER(click), GTK_PHASE_CAPTURE);
+        g_signal_connect(click, "pressed", G_CALLBACK(on_window_clicked), NULL);
+        gtk_widget_add_controller(overlay, GTK_EVENT_CONTROLLER(click));
+    }
 
     app.track        = -1;
     app.shown_second = -1;
@@ -714,6 +1179,10 @@ static void activate(GtkApplication *app_, gpointer user_data)
 
     gtk_window_present(GTK_WINDOW(window));
 
+#if defined(_WIN32)
+    g_idle_add(apply_window_edge_idle, window);
+#endif
+
     app.tick_id = g_timeout_add(TICK_MS, on_tick, NULL);
 
     backdrop_push(cfg->width, cfg->height);
@@ -722,6 +1191,9 @@ static void activate(GtkApplication *app_, gpointer user_data)
     /* 开发 / 性能测试用：自动开墙、定时退出。 */
     if (g_getenv("FOLLOW_WALL_AUTO") != NULL)
         g_timeout_add(1200, debug_open_wall, NULL);
+
+    if (g_getenv("FOLLOW_PALETTE_AUTO") != NULL)
+        g_timeout_add(1600, debug_open_palette, NULL);
 
     if (g_getenv("FOLLOW_WALL_AUTO_PAN") != NULL)
         g_timeout_add(1600, debug_pan_start, NULL);
@@ -763,6 +1235,7 @@ static void startup(GtkApplication *app_, gpointer user_data)
     }
 
     config_load(CONFIG_PATH);
+    settings_load();
 
     cache_prune_prefix("cover", config_cover_max_bytes());
     resolvecache_prune();
@@ -773,6 +1246,14 @@ static void startup(GtkApplication *app_, gpointer user_data)
 
     keymap_init();
     viz_configure(config_viz_effect(), config_viz_particles(), config_viz_gain());
+
+    if (app.media.ready) {
+        media_set_volume(&app.media, settings_volume());
+        media_set_muted(&app.media, settings_muted());
+
+        if (settings_output_device() != NULL)
+            media_set_output_device(&app.media, settings_output_device());
+    }
 
     g_message("visualizer: %s, %d particle(s), gain %.2f",
               viz_effect_name(), config_viz_particles(), config_viz_gain());
@@ -837,6 +1318,9 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
 
     stats_save(&app.stats);
     stats_clear(&app.stats);
+
+    settings_save();
+    settings_clear();
 
     media_clear(&app.media);
     player_clear();

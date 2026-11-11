@@ -155,6 +155,10 @@ void player_update_window_title(void)
         ? g_strdup_printf("%s  —  Follow", label) : NULL;
 
     gtk_window_set_title(GTK_WINDOW(app.window), title != NULL ? title : "Follow");
+
+    if (app.header_title != NULL)
+        gtk_label_set_text(GTK_LABEL(app.header_title),
+                           title != NULL ? title : "Follow");
 }
 
 /* 切歌 */

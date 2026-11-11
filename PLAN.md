@@ -10,8 +10,9 @@ auto-breakpoint: false
 ## Milestones
 
 - [x] M1 — 2K 60fps：GPU 墙 + GPU 背景（带回退）
+- [x] M2 — 命令面板 / 音量 / 输出设备 / 外框（已完成）
 
 ## Current
 
-goal: 2K 60fps + GPU 背景已完成（实测 60-80fps）
-breakpoint: 代码已构建；下一步可选：低配模式 / 音频缓存 / 文档收尾
+goal: 黑边已修：无 CSD 阴影，1px 细边 + 自定义拖动/缩放
+breakpoint: 已构建 main.exe；命令面板/音量/输出设备/边框均已验证

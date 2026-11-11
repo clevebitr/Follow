@@ -59,6 +59,16 @@
 - [x] 纹理缓存按字节预算淘汰（96MB 磁贴 / 24MB overlay）
 - [x] 2K + DComp 实测持续 60–80fps（1080p 100fps+），GL 帧时间 < 0.5ms
 
+## P1.6 — 命令面板 / 音量 / 输出设备（本轮完成）
+
+- [x] 窗口外框：去掉 CSD 12px 阴影（DComp 下会变黑）+ DWM 圆角 / 边框，1px 细边 + 自定义标题栏拖动 / 四边缩放
+- [x] `Ctrl+Shift+P` 命令面板：右下角、输入框在底部、建议向上、VSCode 风格
+- [x] 命令：重载 ini、音量 +/-/50/100/静音、输出设备、可视化、动效、循环/随机、歌词、墙、帮助、全屏、退出
+- [x] 音量 / 静音 / 输出设备写入 `<cache>/follow/settings.ini`，启动时恢复
+- [x] 输出设备枚举 / 切换（miniaudio context + device reinit），切换失败回退
+- [x] `Reload config.ini`：重读曲目 / 按键 / 可视化 / 动效，清磁贴缓存并刷新墙
+- [x] 命令面板支持模糊过滤、↑/↓、PageUp/PageDown、Enter、Esc、Backspace 返回、点外部关闭
+
 ## P2 — 缓存
 
 - [x] 封面磁盘缓存 + 上限清理（`cache_prune_prefix`）

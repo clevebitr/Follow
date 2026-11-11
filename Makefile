@@ -8,6 +8,11 @@ CFLAGS  += -isystem ./src/models
 CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LIBS    := $(shell pkg-config --libs $(PKGS))
 
+# Windows 11：去掉 DWM 默认的 1px 边框 / 圆角（命令行面板和墙都用 CSD）
+ifeq ($(OS),Windows_NT)
+LIBS    += -ldwmapi
+endif
+
 SRCS    := $(wildcard src/*.c src/core/*.c src/ui/*.c)
 OBJS    := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 DEPS    := $(OBJS:.o=.d)
