@@ -18,7 +18,15 @@
 #include "palette.h"
 
 /* 音频粒子背景（dust / warp / flow）。
- * 画在动态背景的小纹理里、scrim 之前；不需要 GL，也不依赖 libvisual。 */
+ * 画在动态背景的小纹理里、scrim 之前；CPU 回退用 cairo，GPU 用下面这组
+ * 预乘加色 sprite 顶点。 */
+
+typedef struct {
+    float x, y;      /* 屏幕逻辑像素 */
+    float u, v;      /* 径向光斑纹理坐标 0..1 */
+    float r, g, b;   /* 颜色 */
+    float a;         /* 透明度 */
+} VizGlVertex;
 
 void        viz_configure(const gchar *effect, int particles, double gain);
 void        viz_reset(void);                 /* 退出时释放 */
@@ -30,6 +38,11 @@ void        viz_tick(void);
 
 /* 在自己的 cairo 目标上画粒子；pal 是当前封面取出的颜色。 */
 void        viz_draw(cairo_t *cr, double w, double h, const Palette *pal);
+
+/* GPU 路径：把当前粒子展开成加色混合的 sprite 四边形。
+ * 返回写入的顶点数（6 的倍数），0 = 没有粒子。 */
+int         viz_gl_vertices(VizGlVertex *out, int max,
+                            double w, double h, const Palette *pal);
 
 /* 换曲时放一小撮新粒子，配合背景退潮过渡。 */
 void        viz_burst(void);

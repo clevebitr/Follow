@@ -12,12 +12,14 @@
 #include "backdrop.h"
 
 #include <math.h>
+#include <string.h>
 
 #include <gtk/gtk.h>
 
 #include "cover.h"
 #include "texture.h"
 #include "theme.h"
+#include "backdropgl.h"
 #include "playlist.h"
 #include "ui.h"
 #include "viz.h"
@@ -25,6 +27,11 @@
 #define BG_WIDTH      512      /* 小纹理的宽度，放大交给 GPU */
 #define BG_BLUR_DIM   160      /* 先把封面缩到这个长边再模糊 */
 #define BG_FRAME_SEC  0.0333   /* 30fps 一帧推进的相位 */
+
+static BackdropFrame g_prepared;
+static gint64        g_base_gen;
+static gint64        g_prev_gen;
+static gboolean      g_has_prev;
 
 static cairo_surface_t *blur_surface(cairo_surface_t *src, int max_dim)
 {
@@ -104,6 +111,8 @@ static void build_base(int width, int height)
         app.bg_base_w = app.bg_base_h = 0;
         return;
     }
+
+    g_base_gen++;
 
     cr = cairo_create(app.bg_base);
     cairo_set_source_rgba(cr, 0.035, 0.035, 0.040, 1.0);
@@ -206,15 +215,92 @@ static void hue_shift(double *r, double *g, double *b, double degrees)
 }
 
 /* 三团渐变：位置 / 半径 / 透明度按不同频率缓慢漂移 */
-static void render_frame(void)
+static void compute_blobs(const Palette *pal, double phase, int sw, int sh,
+                          BackdropBlob out[3])
 {
     struct Blob {
         double bx, by, speed, phase, radius, alpha, r, g, b;
     } blobs[3];
-    int      sw, sh;
-    cairo_t *cr;
-    Palette  pal;
-    double   p;
+
+    blobs[0] = (struct Blob){ 0.76, 0.18, 0.50, 0.0, 1.15, 0.58,
+                              pal->seed_r, pal->seed_g, pal->seed_b };
+    blobs[1] = (struct Blob){ 0.14, 0.68, 0.37, 2.1, 1.00, 0.46,
+                              pal->alt_r, pal->alt_g, pal->alt_b };
+    blobs[2] = (struct Blob){ 0.55, 1.00, 0.29, 4.2, 0.95, 0.44,
+                              pal->deep_r, pal->deep_g, pal->deep_b };
+
+    for (int i = 0; i < 3; i++) {
+        double a     = phase * blobs[i].speed + blobs[i].phase;
+        double x     = (blobs[i].bx + 0.30 * sin(a)) * (double)sw;
+        double y     = (blobs[i].by + 0.24 * cos(a * 0.83)) * (double)sh;
+        double r     = blobs[i].radius * (double)MAX(sw, sh)
+                       * (1.0 + 0.22 * sin(a * 0.7));
+        double alpha = blobs[i].alpha * (1.0 + 0.28 * sin(a * 0.55 + 1.0));
+        double br = blobs[i].r, bg = blobs[i].g, bb = blobs[i].b;
+
+        hue_shift(&br, &bg, &bb, 14.0 * sin(a * 0.45 + (double)i));
+
+        out[i] = (BackdropBlob){
+            (float)x, (float)y, (float)r, (float)CLAMP(alpha, 0.0, 1.0),
+            (float)br, (float)bg, (float)bb,
+        };
+    }
+}
+
+const BackdropFrame *backdrop_prepare(int width, int height)
+{
+    int     sw, sh;
+    double  p;
+    Palette pal;
+
+    memset(&g_prepared, 0, sizeof(g_prepared));
+
+    if (width <= 0 || height <= 0)
+        return &g_prepared;
+
+    bg_small_size(width, height, &sw, &sh);
+    build_base(width, height);
+
+    /* 退潮进度：先算出来，种子色和底图都用同一个值 */
+    if (g_has_prev && app.bg_prev != NULL) {
+        p = fx_t(&app.fx_bg);
+
+        if (p >= 0.999) {
+            g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
+            g_has_prev = FALSE;
+            g_prev_gen++;
+            p = 1.0;
+        }
+    } else {
+        p = 1.0;
+    }
+
+    pal = (g_has_prev && app.bg_prev != NULL && p < 1.0)
+        ? palette_mix(&app.pal_bg_prev, &app.palette, p)
+        : app.palette;
+
+    g_prepared.base       = app.bg_base;
+    g_prepared.prev       = app.bg_prev;
+    g_prepared.base_w     = sw;
+    g_prepared.base_h     = sh;
+    g_prepared.base_gen   = g_base_gen;
+    g_prepared.prev_gen   = g_prev_gen;
+    g_prepared.has_prev   = g_has_prev && app.bg_prev != NULL && p < 1.0;
+    g_prepared.tide       = p;
+    g_prepared.phase      = app.bg_phase;
+    g_prepared.has_palette = pal.has;
+    g_prepared.palette    = pal;
+
+    compute_blobs(&pal, app.bg_phase, sw, sh, g_prepared.blob);
+
+    return &g_prepared;
+}
+
+static void render_frame(int width, int height)
+{
+    const BackdropFrame *f;
+    int                  sw, sh;
+    cairo_t             *cr;
 
     if (app.bg_frame == NULL)
         return;
@@ -222,19 +308,7 @@ static void render_frame(void)
     sw = cairo_image_surface_get_width(app.bg_frame);
     sh = cairo_image_surface_get_height(app.bg_frame);
 
-    /* 退潮进度：先算出来，种子色和底图都用同一个值 */
-    p = app.bg_prev != NULL ? fx_t(&app.fx_bg) : 1.0;
-
-    pal = (app.bg_prev != NULL && p < 1.0)
-        ? palette_mix(&app.pal_bg_prev, &app.palette, p)
-        : app.palette;
-
-    blobs[0] = (struct Blob){ 0.76, 0.18, 0.50, 0.0, 1.15, 0.58,
-                              pal.seed_r, pal.seed_g, pal.seed_b };
-    blobs[1] = (struct Blob){ 0.14, 0.68, 0.37, 2.1, 1.00, 0.46,
-                              pal.alt_r, pal.alt_g, pal.alt_b };
-    blobs[2] = (struct Blob){ 0.55, 1.00, 0.29, 4.2, 0.95, 0.44,
-                              pal.deep_r, pal.deep_g, pal.deep_b };
+    f = backdrop_prepare(width, height);
 
     cr = cairo_create(app.bg_frame);
 
@@ -245,12 +319,13 @@ static void render_frame(void)
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
     /* 背景退潮：新底图先铺满，旧底图整块左移退出，它的右边缘带着一条渐隐带滑走 */
-    if (app.bg_base != NULL) {
-        cairo_set_source_surface(cr, app.bg_base, 0.0, 0.0);
+    if (f->base != NULL) {
+        cairo_set_source_surface(cr, f->base, 0.0, 0.0);
         cairo_paint(cr);
     }
 
-    if (app.bg_prev != NULL && p < 1.0) {
+    if (f->has_prev && f->prev != NULL) {
+        double          p    = f->tide;
         double          seam = (1.0 - p) * (double)sw;
         double          band = (double)sw * 0.26;
         cairo_pattern_t *mask = cairo_pattern_create_linear(0.0, 0.0, (double)sw, 0.0);
@@ -262,29 +337,19 @@ static void render_frame(void)
                                           0.0, 0.0, 0.0, 0.0);
         cairo_pattern_add_color_stop_rgba(mask, 1.0, 0.0, 0.0, 0.0, 0.0);
 
-        cairo_set_source_surface(cr, app.bg_prev, -p * (double)sw, 0.0);
+        cairo_set_source_surface(cr, f->prev, -p * (double)sw, 0.0);
         cairo_mask(cr, mask);
         cairo_pattern_destroy(mask);
-    } else {
-        g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
     }
 
     for (int i = 0; i < 3; i++) {
-        double           a     = app.bg_phase * blobs[i].speed + blobs[i].phase;
-        double           x     = (blobs[i].bx + 0.30 * sin(a)) * (double)sw;
-        double           y     = (blobs[i].by + 0.24 * cos(a * 0.83)) * (double)sh;
-        double           r     = blobs[i].radius * (double)MAX(sw, sh)
-                                 * (1.0 + 0.22 * sin(a * 0.7));
-        double           alpha = blobs[i].alpha * (1.0 + 0.28 * sin(a * 0.55 + 1.0));
-        double           br = blobs[i].r, bg = blobs[i].g, bb = blobs[i].b;
-        cairo_pattern_t *p;
+        const BackdropBlob *b = &f->blob[i];
+        cairo_pattern_t    *p;
 
-        hue_shift(&br, &bg, &bb, 14.0 * sin(a * 0.45 + (double)i));
-
-        p = cairo_pattern_create_radial(x, y, 0.0, x, y, r);
-        cairo_pattern_add_color_stop_rgba(p, 0.00, br, bg, bb, alpha);
-        cairo_pattern_add_color_stop_rgba(p, 0.45, br, bg, bb, alpha * 0.42);
-        cairo_pattern_add_color_stop_rgba(p, 1.00, br, bg, bb, 0.0);
+        p = cairo_pattern_create_radial(b->cx, b->cy, 0.0, b->cx, b->cy, b->r);
+        cairo_pattern_add_color_stop_rgba(p, 0.00, b->cr, b->cg, b->cb, b->alpha);
+        cairo_pattern_add_color_stop_rgba(p, 0.45, b->cr, b->cg, b->cb, b->alpha * 0.42);
+        cairo_pattern_add_color_stop_rgba(p, 1.00, b->cr, b->cg, b->cb, 0.0);
 
         cairo_set_source(cr, p);
         cairo_paint(cr);
@@ -292,7 +357,7 @@ static void render_frame(void)
     }
 
     /* 音频粒子：画在 scrim 之前，所以会被压暗，不会抢文字 */
-    viz_draw(cr, (double)sw, (double)sh, &pal);
+    viz_draw(cr, (double)sw, (double)sh, &f->palette);
 
     /* 压暗，保证白字 / 二维码可读 */
     {
@@ -314,10 +379,14 @@ void backdrop_swap(void)
 {
     /* 换封面：把当前底图和种子色留作退场用，并开始退场过渡 */
     g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
+    g_has_prev = FALSE;
+    g_prev_gen++;
 
     if (app.bg_base != NULL) {
         app.bg_prev     = cairo_surface_reference(app.bg_base);
         app.pal_bg_prev = app.palette;
+        g_has_prev      = TRUE;
+        g_prev_gen++;
         fx_begin(&app.fx_bg, 1.10);
     }
 
@@ -336,8 +405,18 @@ void backdrop_drop(void)
     backdrop_invalidate();
     g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
     g_clear_pointer(&app.bg_frame, cairo_surface_destroy);
+    memset(&g_prepared, 0, sizeof(g_prepared));
+    g_has_prev = FALSE;
+    g_base_gen++;
+    g_prev_gen++;
     fx_stop(&app.fx_bg);
     viz_reset();
+}
+
+void backdrop_step(double dt)
+{
+    app.bg_phase += dt;
+    viz_tick();
 }
 
 void backdrop_push(int width, int height)
@@ -360,7 +439,7 @@ void backdrop_push(int width, int height)
     }
 
     build_base(width, height);
-    render_frame();
+    render_frame(width, height);
 
     /* 小纹理放大到全屏时，高质量缩放滤镜会在亮点周围拉出振铃；
      * 粒子层先做一次 1px 盒式模糊，把高频压掉，环就没了。 */
@@ -391,9 +470,16 @@ gboolean backdrop_tick(gpointer data)
     if (playlist_is_open() && !playlist_is_closing())
         return G_SOURCE_CONTINUE;
 
-    app.bg_phase += BG_FRAME_SEC;
-    viz_tick();
-    backdrop_push(width, height);
+    backdrop_step(BG_FRAME_SEC);
+
+    if (backdropgl_ready()) {
+        /* GPU 背景：30fps 只更新相位 / 粒子并让 GLArea 重画，
+         * 不再生成 512px 的 CPU 小纹理。 */
+        if (app.bg_gl != NULL)
+            gtk_widget_queue_draw(app.bg_gl);
+    } else {
+        backdrop_push(width, height);
+    }
 
     return G_SOURCE_CONTINUE;
 }

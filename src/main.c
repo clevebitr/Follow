@@ -15,7 +15,10 @@
  *   player.c   播放控制、网络解析、曲目信息
  *   lyricview  歌词加载、在线源、偏移、当前行
  *   cover.c    封面加载（本地 / 网络缓存）与绘制
- *   backdrop   动态背景（模糊封面 + 漂移的种子色）
+ *   backdrop   动态背景（模糊封面 + 漂移的种子色；GPU 失败时的 CPU 回退）
+ *   backdropgl 动态背景 GPU 层（光斑 / 粒子 / 压暗 shader）
+ *   wallgl     歌曲墙 GPU 层（磁贴纹理 + 相机 / 选中 / 淡入）
+ *   glutil     墙 / 背景共用的 shader、纹理上传、HiDPI 工具
  *   qrcard     二维码槽、平台胶囊
  *   layout     一次绘制用到的所有几何量
  *   stage      主画面（大时钟 / 备注 / 歌词 / 右列 / 统计）
@@ -27,9 +30,13 @@
 #include <windows.h>
 #endif
 
+#include <stdlib.h>
+#include <string.h>
+
 #include <gtk/gtk.h>
 
 #include "backdrop.h"
+#include "backdropgl.h"
 #include "cache.h"
 #include "config.h"
 #include "cover.h"
@@ -103,17 +110,33 @@ static void track_listening_time(gboolean playing)
 
 static gboolean on_anim_tick(gpointer data)
 {
-    gboolean busy;
+    gboolean stage_anim  = fx_running(&app.fx_stage);
+    gboolean chrome_anim = playlist_chrome_animating();
+    gboolean wall_open   = playlist_is_open();
+    gboolean wall_gpu    = wall_open && wallgl_ready();
+    gboolean wall_cpu    = wall_open && !wall_gpu;
+    gboolean pending     = playlist_frame_pending();
+    gboolean busy        = stage_anim || chrome_anim;
 
     (void)data;
 
-    if (app.canvas != NULL)
+    /* GL 墙由 wallgl 的 frame clock tick 在 vsync 上重建；这个 16ms 泵
+     * 只在 pending 时 queue_draw，让 tick 持续跑。墙控件在开 / 关时会被
+     * 隐藏，tick 会通过 map / unmap 信号重新挂上。 */
+    if (wall_gpu && pending && app.wallgl != NULL)
+        gtk_widget_queue_draw(app.wallgl);
+
+    if (app.canvas != NULL && gtk_widget_get_visible(app.canvas) &&
+        (stage_anim || wall_cpu))
         gtk_widget_queue_draw(app.canvas);
-    if (app.chrome != NULL)
+
+    if (app.chrome != NULL && gtk_widget_get_visible(app.chrome) && chrome_anim)
         gtk_widget_queue_draw(app.chrome);
 
-    busy = fx_running(&app.fx_stage) || fx_running(&app.fx_bg) ||
-           playlist_animating();
+    if (wall_cpu)
+        busy = busy || playlist_animating();
+    if (wall_gpu)
+        busy = busy || pending || playlist_animating();
 
     if (!busy) {
         app.anim_id = 0;
@@ -129,6 +152,47 @@ void ui_animate(void)
         app.anim_id = g_timeout_add(16, on_anim_tick, NULL);
 }
 
+void ui_sync_layers(void)
+{
+    static gint64   warm_start;
+    static gboolean warm_done;
+    gint64           now = g_get_monotonic_time();
+    gboolean         wall_open = playlist_is_open();
+    gboolean         wall_full = wall_open && !playlist_is_closing();
+    gboolean         gpu_wall  = wall_full && wallgl_ready();
+    gboolean         gpu_bg    = backdropgl_ready();
+    gboolean         show_wallgl;
+
+    if (warm_start == 0)
+        warm_start = now;
+
+    if (wallgl_ready())
+        warm_done = TRUE;
+
+    /* 关墙后把 GLArea 真正隐藏：在 DComp 下 GtkGLArea 是原生子表面，
+     * 单纯把 opacity 设成 0 不一定能让它从画面上消失。第一次启动时
+     * 先留着它预热，2 秒内还没 ready（没有 GPU）就不再等。 */
+    show_wallgl = wall_open ||
+                  (!warm_done && now - warm_start < 2 * G_USEC_PER_SEC);
+
+    if (app.wallgl != NULL)
+        gtk_widget_set_visible(app.wallgl, show_wallgl);
+
+    if (app.bg_gl != NULL)
+        gtk_widget_set_visible(app.bg_gl, !wall_full && gpu_bg);
+
+    if (app.bg_picture != NULL)
+        gtk_widget_set_visible(app.bg_picture, !wall_full && !gpu_bg);
+
+    /* 墙全屏时主画布完全被盖住；退出动画期间要留着它垫在主界面下面。 */
+    if (app.canvas != NULL)
+        gtk_widget_set_visible(app.canvas, !gpu_wall);
+
+    /* GL 墙的表头 / 底栏在 chrome 层；cairo 回退时 chrome 由画布一起画。 */
+    if (app.chrome != NULL)
+        gtk_widget_set_visible(app.chrome, wall_open && wallgl_ready());
+}
+
 static gboolean on_tick(gpointer data)
 {
     gboolean playing, paused;
@@ -139,6 +203,8 @@ static gboolean on_tick(gpointer data)
 
     player_check_finished();
     player_check_load_failure();
+
+    ui_sync_layers();
 
     playing = media_is_playing(&app.media);
     paused  = media_is_paused(&app.media);
@@ -152,6 +218,9 @@ static gboolean on_tick(gpointer data)
         app.last_width  = width;
         app.last_height = height;
         ui_request_redraw();
+
+        if (playlist_is_open())
+            playlist_request_frame();
     }
 
     position = media_position(&app.media);
@@ -160,6 +229,11 @@ static gboolean on_tick(gpointer data)
     if (second != app.shown_second) {
         app.shown_second = second;
         ui_request_redraw();
+
+        if (playlist_is_open()) {
+            app.chrome_dirty = TRUE;
+            playlist_request_frame();
+        }
     }
 
     if (playing != app.last_playing || paused != app.last_paused) {
@@ -181,9 +255,15 @@ static gboolean on_tick(gpointer data)
 
     if (app.dirty) {
         app.dirty = FALSE;
-        if (app.canvas != NULL)
+
+        if (app.canvas != NULL && gtk_widget_get_visible(app.canvas))
             gtk_widget_queue_draw(app.canvas);
-        if (app.chrome != NULL)
+    }
+
+    if (app.chrome_dirty) {
+        app.chrome_dirty = FALSE;
+
+        if (app.chrome != NULL && gtk_widget_get_visible(app.chrome))
             gtk_widget_queue_draw(app.chrome);
     }
 
@@ -216,11 +296,13 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         if (keymap_match(KEY_HELP, keyval, state) ||
             keymap_match(KEY_BACK, keyval, state)) {
             app.help = FALSE;
+            app.chrome_dirty = TRUE;
             ui_request_redraw();
         } else if (keymap_match(KEY_QUIT, keyval, state)) {
             gtk_window_close(GTK_WINDOW(app.window));
         } else if (keymap_match(KEY_PLAYLIST, keyval, state)) {
             app.help = FALSE;
+            app.chrome_dirty = TRUE;
             playlist_open_page();
         }
 
@@ -238,6 +320,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         if (keymap_match(KEY_HELP, keyval, state)) {
             playlist_close();
             app.help = TRUE;
+            app.chrome_dirty = TRUE;
             ui_request_redraw();
             return TRUE;
         }
@@ -346,6 +429,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     }
     if (keymap_match(KEY_HELP, keyval, state)) {
         app.help = TRUE;
+        app.chrome_dirty = TRUE;
         ui_request_redraw();
         return TRUE;
     }
@@ -424,6 +508,32 @@ static gboolean on_canvas_scroll(GtkEventControllerScroll *controller,
 }
 
 
+/* 墙的鼠标事件：GL 墙打开时 canvas 会被隐藏、chrome 是最上面的接收层；
+ * cairo 回退时事件仍然落在 canvas 上。两个控件各自挂一套控制器。 */
+static void attach_wall_input(GtkWidget *widget)
+{
+    GtkGesture         *click  = gtk_gesture_click_new();
+    GtkGesture         *drag   = gtk_gesture_drag_new();
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    GtkEventController *scroll = gtk_event_controller_scroll_new(
+        GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
+
+    g_signal_connect(click, "released", G_CALLBACK(on_canvas_released), NULL);
+    g_signal_connect(drag, "drag-begin", G_CALLBACK(on_canvas_drag_begin), NULL);
+    g_signal_connect(drag, "drag-update", G_CALLBACK(on_canvas_drag_update), NULL);
+    g_signal_connect(drag, "drag-end", G_CALLBACK(on_canvas_drag_end), NULL);
+    g_signal_connect(motion, "motion", G_CALLBACK(on_canvas_motion), NULL);
+    g_signal_connect(scroll, "scroll", G_CALLBACK(on_canvas_scroll), NULL);
+
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(drag));
+    gtk_widget_add_controller(widget, motion);
+    gtk_widget_add_controller(widget, scroll);
+}
+
 /* 窗口销毁时先把定时器和控件指针收干净：GApplication 的 shutdown
  * 比窗口销毁晚一步，晚到的 tick 不能再碰已经释放的 canvas。 */
 static void on_window_destroy(GtkWidget *widget, gpointer data)
@@ -448,6 +558,76 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
     app.chrome     = NULL;
     app.wallgl     = NULL;
     app.bg_picture = NULL;
+    app.bg_gl      = NULL;
+}
+
+static gboolean debug_open_wall(gpointer data);
+
+static gboolean debug_close_wall(gpointer data)
+{
+    (void)data;
+
+    g_message("debug: closing wall (FOLLOW_WALL_AUTO_CLOSE)");
+    playlist_close();
+
+    if (g_getenv("FOLLOW_WALL_AUTO_REOPEN") != NULL)
+        g_timeout_add(1200, debug_open_wall, NULL);
+
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean debug_open_wall(gpointer data)
+{
+    static gboolean auto_closed;
+
+    (void)data;
+
+    g_message("debug: opening wall (FOLLOW_WALL_AUTO)");
+    playlist_open_page();
+    g_message("debug: wall open=%d closing=%d ready=%d vis=%.2f",
+              playlist_is_open(), playlist_is_closing(), wallgl_ready(), 0.0);
+
+    if (g_getenv("FOLLOW_WALL_AUTO_CLOSE") != NULL && !auto_closed) {
+        auto_closed = TRUE;
+        g_timeout_add(2000, debug_close_wall, NULL);
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean debug_quit(gpointer data)
+{
+    (void)data;
+
+    g_message("debug: quitting (FOLLOW_EXIT_MS)");
+
+    if (app.window != NULL)
+        gtk_window_close(GTK_WINDOW(app.window));
+
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean debug_pan(gpointer data)
+{
+    static int ticks;
+
+    (void)data;
+
+    if (ticks++ > 1200)
+        return G_SOURCE_REMOVE;
+
+    if (playlist_is_open())
+        playlist_pan_by(0.55, 0.20);
+
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean debug_pan_start(gpointer data)
+{
+    (void)data;
+
+    g_timeout_add(8, debug_pan, NULL);
+    return G_SOURCE_REMOVE;
 }
 
 static void activate(GtkApplication *app_, gpointer user_data)
@@ -488,19 +668,27 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.canvas), stage_render, NULL, NULL);
 
     /* 歌曲墙：GL 层画磁贴，透明 chrome 层画表头 / 底栏。
-     * 两层都不接输入，鼠标事件继续落到 canvas 上。 */
+     * GL 墙打开时 canvas 被隐藏，chrome 是顶层接收层；cairo 回退时
+     * 事件仍然落在 canvas 上。 */
     app.wallgl = wallgl_new();
 
     app.chrome = gtk_drawing_area_new();
     gtk_widget_set_hexpand(app.chrome, TRUE);
     gtk_widget_set_vexpand(app.chrome, TRUE);
-    gtk_widget_set_can_target(app.chrome, FALSE);
+    gtk_widget_set_can_target(app.chrome, TRUE);
     gtk_widget_add_css_class(app.chrome, "canvas");
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.chrome),
                                    stage_chrome_render, NULL, NULL);
 
+    /* 动态背景：优先 GL；上下文 / shader 失败时保持 GtkPicture 的 CPU 路径。 */
+    app.bg_gl = backdropgl_new();
+
     overlay = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(overlay), app.bg_picture);
+
+    if (app.bg_gl != NULL)
+        gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.bg_gl);
+
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.canvas);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.wallgl);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.chrome);
@@ -511,28 +699,8 @@ static void activate(GtkApplication *app_, gpointer user_data)
     g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key_pressed), NULL);
     gtk_widget_add_controller(window, keys);
 
-    {
-        GtkGesture         *click  = gtk_gesture_click_new();
-        GtkGesture         *drag   = gtk_gesture_drag_new();
-        GtkEventController *motion = gtk_event_controller_motion_new();
-        GtkEventController *scroll = gtk_event_controller_scroll_new(
-            GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
-
-        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
-        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
-
-        g_signal_connect(click, "released", G_CALLBACK(on_canvas_released), NULL);
-        g_signal_connect(drag, "drag-begin", G_CALLBACK(on_canvas_drag_begin), NULL);
-        g_signal_connect(drag, "drag-update", G_CALLBACK(on_canvas_drag_update), NULL);
-        g_signal_connect(drag, "drag-end", G_CALLBACK(on_canvas_drag_end), NULL);
-        g_signal_connect(motion, "motion", G_CALLBACK(on_canvas_motion), NULL);
-        g_signal_connect(scroll, "scroll", G_CALLBACK(on_canvas_scroll), NULL);
-
-        gtk_widget_add_controller(app.canvas, GTK_EVENT_CONTROLLER(click));
-        gtk_widget_add_controller(app.canvas, GTK_EVENT_CONTROLLER(drag));
-        gtk_widget_add_controller(app.canvas, motion);
-        gtk_widget_add_controller(app.canvas, scroll);
-    }
+    attach_wall_input(app.canvas);
+    attach_wall_input(app.chrome);
 
     app.track        = -1;
     app.shown_second = -1;
@@ -550,6 +718,17 @@ static void activate(GtkApplication *app_, gpointer user_data)
 
     backdrop_push(cfg->width, cfg->height);
     app.bg_tick_id = g_timeout_add(33, backdrop_tick, NULL);
+
+    /* 开发 / 性能测试用：自动开墙、定时退出。 */
+    if (g_getenv("FOLLOW_WALL_AUTO") != NULL)
+        g_timeout_add(1200, debug_open_wall, NULL);
+
+    if (g_getenv("FOLLOW_WALL_AUTO_PAN") != NULL)
+        g_timeout_add(1600, debug_pan_start, NULL);
+
+    if (g_getenv("FOLLOW_EXIT_MS") != NULL)
+        g_timeout_add((guint)MAX(100, atoi(g_getenv("FOLLOW_EXIT_MS"))),
+                      debug_quit, NULL);
 }
 
 static void startup(GtkApplication *app_, gpointer user_data)
@@ -664,6 +843,7 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     lyricview_clear();
     cover_clear();
     backdrop_drop();
+    backdropgl_clear();
     qrcard_clear();
     playlist_clear();
     keymap_clear();
@@ -679,6 +859,25 @@ int main(int argc, char **argv)
 
 #if defined(_WIN32)
     SetConsoleOutputCP(CP_UTF8);
+
+    /* GTK 4.24 的 Win32 后端默认不创建 DirectComposition 设备，GSK 于是
+     * 一直退回 cairo 软件合成，2K 全屏墙每帧都要把 GL 纹理读回内存。
+     * 打开 dcomp 后 GSK 才能用 GL 渲染器；驱动不支持时 GTK 会自己退回
+     * cairo。想强制关掉可以设 FOLLOW_DCOMP=0 或 GSK_RENDERER=cairo。 */
+    if (g_strcmp0(g_getenv("FOLLOW_DCOMP"), "0") != 0 &&
+        g_strcmp0(g_getenv("GSK_RENDERER"), "cairo") != 0) {
+        const gchar *cur = g_getenv("GDK_DEBUG");
+
+        if (cur == NULL || strstr(cur, "dcomp") == NULL) {
+            gchar *next = (cur != NULL && *cur != '\0')
+                ? g_strconcat(cur, ",dcomp", NULL)
+                : g_strdup("dcomp");
+
+            g_setenv("GDK_DEBUG", next, TRUE);
+            g_message("win32: GDK_DEBUG=%s (DirectComposition)", next);
+            g_free(next);
+        }
+    }
 #endif
 
     app_ = gtk_application_new(FOLLOW_APP_ID, FOLLOW_APP_FLAGS);

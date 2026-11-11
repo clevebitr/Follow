@@ -681,3 +681,126 @@ void viz_draw(cairo_t *cr, double w, double h, const Palette *pal)
 
     cairo_restore(cr);
 }
+
+/* ---------------- GPU sprite 顶点 ---------------- */
+
+static void emit_sprite(VizGlVertex *out, int *n, int max,
+                        double cx, double cy, double radius,
+                        double r, double g_, double b, double a)
+{
+    double half;
+
+    if (out == NULL || radius <= 0.0 || a <= 0.001)
+        return;
+
+    if (*n + 6 > max)
+        return;
+
+    /* 和 draw_dot 一致：可见核心是 radius，径向渐变铺到 2.6 倍。 */
+    half = radius * 2.6;
+
+    {
+        const double x0 = cx - half, y0 = cy - half;
+        const double x1 = cx + half, y1 = cy + half;
+        const VizGlVertex verts[6] = {
+            { (float)x0, (float)y0, 0.0f, 0.0f, (float)r, (float)g_, (float)b, (float)a },
+            { (float)x1, (float)y0, 1.0f, 0.0f, (float)r, (float)g_, (float)b, (float)a },
+            { (float)x0, (float)y1, 0.0f, 1.0f, (float)r, (float)g_, (float)b, (float)a },
+            { (float)x1, (float)y0, 1.0f, 0.0f, (float)r, (float)g_, (float)b, (float)a },
+            { (float)x1, (float)y1, 1.0f, 1.0f, (float)r, (float)g_, (float)b, (float)a },
+            { (float)x0, (float)y1, 0.0f, 1.0f, (float)r, (float)g_, (float)b, (float)a },
+        };
+
+        memcpy(out + *n, verts, sizeof(verts));
+        *n += 6;
+    }
+}
+
+int viz_gl_vertices(VizGlVertex *out, int max, double w, double h,
+                    const Palette *pal)
+{
+    int    n = 0;
+    double unit;
+
+    if (!viz_active() || out == NULL || max < 6 || w <= 0.0 || h <= 0.0)
+        return 0;
+
+    unit = MIN(w, h);
+
+    if (g.effect == VIZ_WARP) {
+        double cx = w * 0.5;
+        double cy = h * 0.5;
+        double rr = unit * (0.10 + 0.14 * (double)g.bass + 0.08 * (double)g.flash);
+        double r, gg, b;
+
+        particle_color(pal, 0.35f, &r, &gg, &b);
+        emit_sprite(out, &n, max, cx, cy, rr * 0.40,
+                    r, gg, b, 0.10 + 0.18 * (double)g.bass);
+    }
+
+    for (int i = 0; i < g.count; i++) {
+        const VizParticle *p = &g.particles[i];
+        double r, gg, b;
+        double fade = particle_fade(p);
+        double x    = (double)p->x * w;
+        double y    = (double)p->y * h;
+        double size = unit * (double)p->size;
+        double a;
+
+        if (fade <= 0.0)
+            continue;
+
+        particle_color(pal, p->tint, &r, &gg, &b);
+
+        switch (g.effect) {
+        case VIZ_DUST: {
+            double twinkle = 0.72 + 0.28 * sin(g.time * 1.7 + (double)p->phase);
+
+            a = (double)p->alpha * fade * twinkle
+              * (0.62 + 0.55 * (double)g.level);
+
+            emit_sprite(out, &n, max, x, y, size, r, gg, b, a);
+            break;
+        }
+        case VIZ_WARP: {
+            int    prev = (p->trail_head - 1 + VIZ_TRAIL) % VIZ_TRAIL;
+            double px   = (double)p->trail_x[prev] * w;
+            double py   = (double)p->trail_y[prev] * h;
+
+            a = (double)p->alpha * fade * (0.40 + 0.75 * (double)g.bass);
+
+            /* 用两点 + 中点拼一条发光短拖尾，避免 GPU 路径再开一个线段 shader。 */
+            emit_sprite(out, &n, max, px, py, MAX(0.35, size * 0.55),
+                        r, gg, b, a * 0.55);
+            emit_sprite(out, &n, max, (px + x) * 0.5, (py + y) * 0.5,
+                        MAX(0.30, size * 0.50), r, gg, b, a * 0.75);
+            emit_sprite(out, &n, max, x, y, MAX(0.35, size * 0.45),
+                        r, gg, b, a * 0.9);
+            break;
+        }
+        case VIZ_FLOW: {
+            int head = p->trail_head;
+
+            a = (double)p->alpha * fade * (0.35 + 0.65 * (double)g.mid);
+
+            for (int k = VIZ_TRAIL - 1; k >= 0; k--) {
+                int    idx = (head - k + VIZ_TRAIL) % VIZ_TRAIL;
+                double tx  = (double)p->trail_x[idx] * w;
+                double ty  = (double)p->trail_y[idx] * h;
+                double t   = (double)(VIZ_TRAIL - k) / (double)VIZ_TRAIL;
+                double tr  = unit * (double)p->size * (0.55 + t * 0.55);
+
+                emit_sprite(out, &n, max, tx, ty, tr, r, gg, b, a * t * 0.55);
+            }
+
+            emit_sprite(out, &n, max, x, y, unit * (double)p->size * 0.9,
+                        r, gg, b, a);
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    return n;
+}

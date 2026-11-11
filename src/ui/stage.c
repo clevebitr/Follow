@@ -355,17 +355,13 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
         if (playlist_is_closing())
             draw_stage(cr, width, height);
 
-        /* GL 层可用时墙在 GPU 上画，cairo 这张画布保持透明；
-         * 表头 / 底栏由上层 chrome 画布负责。 */
-        if (wallgl_ready()) {
-            playlist_build_frame((double)width, (double)height);
-
-            /* 这一帧刚好播完退场：立刻把主界面补上，不留黑帧 */
-            if (!playlist_is_open())
-                draw_stage(cr, width, height);
-        } else {
+        /* GL 层可用时墙在 GPU 上画，并由 wallgl 的 frame clock 重建帧；
+         * 这张 cairo 画布保持透明（墙打开时会被隐藏）。
+         * 没有 GL 时退回整屏 cairo。 */
+        if (!wallgl_ready()) {
             playlist_draw(cr, (double)width, (double)height);
 
+            /* 这一帧刚好播完退场：立刻把主界面补上，不留黑帧 */
             if (!playlist_is_open())
                 draw_stage(cr, width, height);
         }

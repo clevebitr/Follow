@@ -25,6 +25,9 @@ void     playlist_close(void);
 gboolean playlist_is_open(void);
 gboolean playlist_is_closing(void);
 gboolean playlist_animating(void);
+gboolean playlist_chrome_animating(void);   /* 进场 / 退场时 chrome 层也要重画 */
+gboolean playlist_frame_pending(void);       /* GL 墙是否有新的帧要提交 */
+void     playlist_request_frame(void);       /* 标记一帧脏（鼠标 / 焦点变化） */
 
 /* 方向键：dx/dy 取 -1 / 0 / 1 */
 void     playlist_move(gint dx, gint dy);
@@ -39,10 +42,11 @@ void     playlist_draw_chrome(cairo_t *cr, double w, double h);          /* GL �
 
 /* 给 GL 纹理用的 cairo 缓存；surface 由 playlist 持有，调用方不要 destroy。
  * overlay 四周比磁贴多 4px（选中描边的外圈）。 */
-cairo_surface_t *playlist_tile_surface(gsize track, int w, int h);
+cairo_surface_t *playlist_tile_surface_cached(gsize track, int w, int h, int scale);
+void             playlist_tile_request(gsize track, int w, int h, int scale);
 cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
                                        gboolean selected, gboolean hovered,
-                                       gboolean current);
+                                       gboolean current, int scale);
 
 /* 鼠标：拖动 / 滚轮 / 悬停 / 点击 */
 void     playlist_pan_begin(double x, double y);

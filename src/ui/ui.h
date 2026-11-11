@@ -40,11 +40,13 @@ typedef struct {
     GtkWidget *wallgl;      /* 歌曲墙 GPU 层 */
     GtkWidget *chrome;      /* 歌曲墙表头 / 底栏 / 帮助页（透明层） */
     GtkWidget *bg_picture;
+    GtkWidget *bg_gl;       /* 动态背景 GPU 层（失败时回退到 bg_picture） */
     guint      tick_id;
     guint      bg_tick_id;
 
     /* 画面刷新 */
     gboolean dirty;
+    gboolean chrome_dirty;   /* 歌曲墙表头 / 底栏需要重画 */
     gboolean help;
     gboolean last_playing;
     gboolean last_paused;
@@ -121,5 +123,9 @@ static inline void ui_request_redraw(void)
 }
 
 void ui_animate(void);
+
+/* 根据「歌曲墙是否打开 / GL 是否可用」切换各图层的可见性，
+ * 避免在墙全屏遮住画面时还去合成背景和主画布。 */
+void ui_sync_layers(void);
 
 #endif /* FOLLOW_UI_H */

@@ -46,6 +46,19 @@
   - [x] `[ui] animations = false` 时直接 snap，不跑 60fps
   - [ ] 可选降低磁贴缓存分辨率 / 限制同屏数量
 
+## P1.5 — 2K 60fps / GPU 背景（本轮完成）
+
+- [x] Windows 启动时自动启用 `GDK_DEBUG=dcomp`，让 GSK 用 GL 合成（`FOLLOW_DCOMP=0` / `GSK_RENDERER=cairo` 可强制回退）
+- [x] 动态背景 GPU 层：模糊底图纹理 + shader 光斑 + 加色粒子 sprite + scrim，`FOLLOW_BACKDROPGL=0` 退回 CPU 小纹理
+- [x] 墙的 frame clock tick 在 map / unmap 时重新挂载，开墙 → 关墙 → 再开墙不会停帧
+- [x] 16ms 泵只在 pending 时 `queue_draw`，chrome 只在 focus / 时间变化 / 进场退场时重画
+- [x] 封面解码全部移到后台线程（本地 / 远程缓存命中也不阻塞 UI）
+- [x] 磁贴 cairo 纹理改低优先级队列生成，打开墙不再同步卡 100ms+；focus 磁贴同步预热
+- [x] 关墙不再清空磁贴缓存，二次打开 0–4ms
+- [x] HiDPI：墙 viewport 按设备像素设置，磁贴 / overlay 按 scale 渲染
+- [x] 纹理缓存按字节预算淘汰（96MB 磁贴 / 24MB overlay）
+- [x] 2K + DComp 实测持续 60–80fps（1080p 100fps+），GL 帧时间 < 0.5ms
+
 ## P2 — 缓存
 
 - [x] 封面磁盘缓存 + 上限清理（`cache_prune_prefix`）

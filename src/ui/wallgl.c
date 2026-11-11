@@ -16,17 +16,14 @@
 #include <string.h>
 
 #include "covercache.h"
+#include "glutil.h"
 #include "playlist.h"
 
 /* 一块单位四边形，用 uniform 的 u_rect 摆到屏幕坐标。 */
-static const float QUAD[] = {
-    0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,
-    1.0f, 0.0f,  1.0f, 1.0f,  0.0f, 1.0f,
-};
-
 static const char *VS =
     "#version 330 core\n"
     "layout(location = 0) in vec2 a_pos;\n"
+    "layout(location = 1) in vec2 a_uv;\n"
     "uniform vec2 u_view;\n"
     "uniform vec4 u_rect;\n"
     "uniform vec2 u_offset;\n"
@@ -35,7 +32,7 @@ static const char *VS =
     "    vec2 p = u_rect.xy + a_pos * u_rect.zw + u_offset;\n"
     "    gl_Position = vec4(p.x / u_view.x * 2.0 - 1.0,\n"
     "                       1.0 - p.y / u_view.y * 2.0, 0.0, 1.0);\n"
-    "    v_uv = a_pos;\n"
+    "    v_uv = a_uv;\n"
     "}\n";
 
 static const char *FS =
@@ -50,18 +47,24 @@ static const char *FS =
     "    out_color = c * u_color;\n"
     "}\n";
 
-#define TILE_CACHE_MAX    128
-#define OVERLAY_CACHE_MAX  24
-#define GLOW_SIZE         128
-#define OVERLAY_PAD       4
+#define TILE_CACHE_MAX      128
+#define OVERLAY_CACHE_MAX    24
+#define GLOW_SIZE           128
+#define OVERLAY_PAD           4
+
+/* 纹理缓存预算。2K / 4K 上磁贴纹理比 1080p 大很多，不能只按条数算。 */
+#define TILE_CACHE_BUDGET    (96u * 1024u * 1024u)
+#define OVERLAY_CACHE_BUDGET (24u * 1024u * 1024u)
 
 typedef struct {
     gboolean used;
     gsize    track;
     int      w, h;
+    int      scale;
     gint64   version;
     guint    flags;
     GLuint   tex;
+    gsize    bytes;
     gint64   used_us;
 } TexItem;
 
@@ -71,6 +74,10 @@ static gboolean    g_ready;
 static gboolean    g_failed;
 static WallGlFrame g_frame;
 static int         g_frame_cap;
+static float       g_opacity = -1.0f;
+static guint       g_tick_id;
+
+static gboolean on_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data);
 
 static GLuint g_prog;
 static GLuint g_vao;
@@ -80,6 +87,8 @@ static GLint  g_u_view, g_u_rect, g_u_offset, g_u_color, g_u_use_tex, g_u_tex;
 
 static TexItem g_tiles[TILE_CACHE_MAX];
 static TexItem g_overlays[OVERLAY_CACHE_MAX];
+static gsize   g_tile_bytes;
+static gsize   g_overlay_bytes;
 
 /* 环境变量 FOLLOW_WALL_DEBUG=1 时的帧时间统计 */
 static gint   g_dbg_uploads;
@@ -92,62 +101,14 @@ static gint64 now_us(void)
     return g_get_monotonic_time();
 }
 
-/* ---------------- shader ---------------- */
-
-static GLuint compile(GLenum type, const char *src)
-{
-    GLuint shader = glCreateShader(type);
-    GLint  ok = 0;
-
-    glShaderSource(shader, 1, &src, NULL);
-    glCompileShader(shader);
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-
-    if (!ok) {
-        GLchar log[1024] = { 0 };
-
-        glGetShaderInfoLog(shader, sizeof(log) - 1, NULL, log);
-        g_warning("wallgl: shader compile failed: %s", log);
-        glDeleteShader(shader);
-        return 0;
-    }
-
-    return shader;
-}
+/* ---------------- shader / 资源 ---------------- */
 
 static gboolean build_program(void)
 {
-    GLuint vs = compile(GL_VERTEX_SHADER, VS);
-    GLuint fs;
-    GLint  ok = 0;
+    g_prog = gl_util_program(VS, FS, "wallgl");
 
-    if (vs == 0)
+    if (g_prog == 0)
         return FALSE;
-
-    fs = compile(GL_FRAGMENT_SHADER, FS);
-    if (fs == 0) {
-        glDeleteShader(vs);
-        return FALSE;
-    }
-
-    g_prog = glCreateProgram();
-    glAttachShader(g_prog, vs);
-    glAttachShader(g_prog, fs);
-    glLinkProgram(g_prog);
-    glGetProgramiv(g_prog, GL_LINK_STATUS, &ok);
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    if (!ok) {
-        GLchar log[1024] = { 0 };
-
-        glGetProgramInfoLog(g_prog, sizeof(log) - 1, NULL, log);
-        g_warning("wallgl: program link failed: %s", log);
-        glDeleteProgram(g_prog);
-        g_prog = 0;
-        return FALSE;
-    }
 
     g_u_view    = glGetUniformLocation(g_prog, "u_view");
     g_u_rect    = glGetUniformLocation(g_prog, "u_rect");
@@ -157,18 +118,6 @@ static gboolean build_program(void)
     g_u_tex     = glGetUniformLocation(g_prog, "u_tex");
 
     return TRUE;
-}
-
-static void build_quad(void)
-{
-    glGenVertexArrays(1, &g_vao);
-    glBindVertexArray(g_vao);
-    glGenBuffers(1, &g_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(QUAD), QUAD, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
-    glBindVertexArray(0);
 }
 
 /* 选中磁贴的柔光：一张白色径向 alpha 图，绘制时用 u_color 染色。 */
@@ -216,13 +165,11 @@ static gboolean ensure_resources(void)
         return FALSE;
     }
 
-    build_quad();
+    gl_util_quad(&g_vao, &g_vbo);
     build_glow();
 
     g_ready = TRUE;
-    g_message("wallgl: OpenGL %s / %s",
-              glGetString(GL_VERSION) != NULL ? (const char *)glGetString(GL_VERSION) : "?",
-              glGetString(GL_RENDERER) != NULL ? (const char *)glGetString(GL_RENDERER) : "?");
+    gl_util_log_context("wallgl");
     return TRUE;
 }
 
@@ -230,38 +177,10 @@ static gboolean ensure_resources(void)
 
 static GLuint upload_surface(cairo_surface_t *surface)
 {
-    GLuint          tex;
-    int             w, h, stride;
-    const guchar   *data;
+    GLuint tex = gl_util_texture_from_surface(surface);
 
-    if (surface == NULL || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
-        return 0;
-
-    cairo_surface_flush(surface);
-
-    w      = cairo_image_surface_get_width(surface);
-    h      = cairo_image_surface_get_height(surface);
-    stride = cairo_image_surface_get_stride(surface);
-    data   = cairo_image_surface_get_data(surface);
-
-    if (w <= 0 || h <= 0 || data == NULL)
-        return 0;
-
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    /* cairo ARGB32 在小端内存里是 B,G,R,A，正好对应 GL_BGRA；预乘 alpha 直接可用。 */
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
-                 GL_BGRA, GL_UNSIGNED_BYTE, data);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-
-    g_dbg_uploads++;
+    if (tex != 0)
+        g_dbg_uploads++;
 
     return tex;
 }
@@ -281,14 +200,80 @@ static int cache_pick(TexItem *items, int count)
     return slot;
 }
 
-static GLuint tile_texture(const WallGlTile *tile)
+/* 按预算淘汰最久未使用的纹理。need 是新纹理的字节数。 */
+static void cache_trim(TexItem *items, int count, gsize *bytes, gsize budget,
+                       gsize need)
 {
-    int      w = (int)ceil(tile->w);
-    int      h = (int)ceil(tile->h);
-    gint64   version = covercache_version(tile->track);
-    gint64   now = now_us();
-    int      slot;
-    GLuint   tex;
+    while (*bytes > 0 && *bytes + need > budget) {
+        int victim = -1;
+
+        for (int i = 0; i < count; i++) {
+            if (!items[i].used)
+                continue;
+
+            if (victim < 0 || items[i].used_us < items[victim].used_us)
+                victim = i;
+        }
+
+        if (victim < 0)
+            return;
+
+        if (items[victim].tex != 0)
+            glDeleteTextures(1, &items[victim].tex);
+
+        *bytes -= items[victim].bytes;
+        memset(&items[victim], 0, sizeof(items[victim]));
+    }
+}
+
+static GLuint cache_texture(TexItem *items, int count, gsize *bytes, gsize budget,
+                            gsize track, int w, int h, int scale, gint64 version,
+                            guint flags, cairo_surface_t *surface)
+{
+    int    slot;
+    GLuint tex;
+    gsize  need = (gsize)MAX(1, w * scale) * (gsize)MAX(1, h * scale) * 4u;
+
+    cache_trim(items, count, bytes, budget, need);
+
+    slot = cache_pick(items, count);
+    if (slot < 0)
+        return 0;
+
+    if (items[slot].used && items[slot].tex != 0) {
+        glDeleteTextures(1, &items[slot].tex);
+        *bytes -= items[slot].bytes;
+    }
+
+    tex = upload_surface(surface);
+
+    memset(&items[slot], 0, sizeof(items[slot]));
+
+    if (tex != 0) {
+        items[slot].used    = TRUE;
+        items[slot].track   = track;
+        items[slot].w       = w;
+        items[slot].h       = h;
+        items[slot].scale   = scale;
+        items[slot].version = version;
+        items[slot].flags   = flags;
+        items[slot].tex     = tex;
+        items[slot].bytes   = need;
+        items[slot].used_us = now_us();
+        *bytes += need;
+    }
+
+    return tex;
+}
+
+static GLuint tile_texture(const WallGlTile *tile, int scale)
+{
+    int             w = (int)ceil(tile->w);
+    int             h = (int)ceil(tile->h);
+    gint64          version = covercache_version(tile->track);
+    gint64          now = now_us();
+    cairo_surface_t *surface;
+    int             fallback = -1;
 
     if (w < 8 || h < 8)
         return 0;
@@ -296,44 +281,48 @@ static GLuint tile_texture(const WallGlTile *tile)
     for (int i = 0; i < TILE_CACHE_MAX; i++) {
         if (g_tiles[i].used && g_tiles[i].track == tile->track &&
             g_tiles[i].w == w && g_tiles[i].h == h &&
-            g_tiles[i].version == version) {
+            g_tiles[i].scale == scale && g_tiles[i].version == version) {
             g_tiles[i].used_us = now;
             return g_tiles[i].tex;
         }
+
+        if (g_tiles[i].used && g_tiles[i].track == tile->track &&
+            g_tiles[i].w == w && g_tiles[i].h == h &&
+            g_tiles[i].scale == scale) {
+            if (fallback < 0 || g_tiles[i].used_us > g_tiles[fallback].used_us)
+                fallback = i;
+        }
     }
 
-    slot = cache_pick(g_tiles, TILE_CACHE_MAX);
-    if (slot < 0)
+    surface = playlist_tile_surface_cached(tile->track, w, h, scale);
+
+    if (surface == NULL) {
+        /* 磁贴纹理还没生成：先继续用同一张的旧版本（避免封面加载后闪白），
+         * 同时把它交给 playlist 的低优先级预热队列。 */
+        playlist_tile_request(tile->track, w, h, scale);
+
+        if (fallback >= 0) {
+            g_tiles[fallback].used_us = now;
+            return g_tiles[fallback].tex;
+        }
+
         return 0;
+    }
 
-    if (g_tiles[slot].used && g_tiles[slot].tex != 0)
-        glDeleteTextures(1, &g_tiles[slot].tex);
-
-    tex = upload_surface(playlist_tile_surface(tile->track, w, h));
-
-    g_tiles[slot].used    = tex != 0;
-    g_tiles[slot].track   = tile->track;
-    g_tiles[slot].w       = w;
-    g_tiles[slot].h       = h;
-    g_tiles[slot].version = version;
-    g_tiles[slot].flags   = 0;
-    g_tiles[slot].tex     = tex;
-    g_tiles[slot].used_us = now;
-
-    return tex;
+    return cache_texture(g_tiles, TILE_CACHE_MAX, &g_tile_bytes,
+                         TILE_CACHE_BUDGET, tile->track, w, h, scale,
+                         version, 0, surface);
 }
 
-static GLuint overlay_texture(const WallGlTile *tile)
+static GLuint overlay_texture(const WallGlTile *tile, int scale)
 {
-    int      w = (int)ceil(tile->w);
-    int      h = (int)ceil(tile->h);
-    gint64   version = covercache_version(tile->track);
-    guint    flags = (tile->selected ? 1u : 0u) |
-                     (tile->hovered ? 2u : 0u) |
-                     (tile->current ? 4u : 0u);
-    gint64   now = now_us();
-    int      slot;
-    GLuint   tex;
+    int    w = (int)ceil(tile->w);
+    int    h = (int)ceil(tile->h);
+    gint64 version = covercache_version(tile->track);
+    guint  flags = (tile->selected ? 1u : 0u) |
+                   (tile->hovered ? 2u : 0u) |
+                   (tile->current ? 4u : 0u);
+    gint64 now = now_us();
 
     if (w < 8 || h < 8 || flags == 0)
         return 0;
@@ -341,33 +330,19 @@ static GLuint overlay_texture(const WallGlTile *tile)
     for (int i = 0; i < OVERLAY_CACHE_MAX; i++) {
         if (g_overlays[i].used && g_overlays[i].track == tile->track &&
             g_overlays[i].w == w && g_overlays[i].h == h &&
+            g_overlays[i].scale == scale &&
             g_overlays[i].version == version && g_overlays[i].flags == flags) {
             g_overlays[i].used_us = now;
             return g_overlays[i].tex;
         }
     }
 
-    slot = cache_pick(g_overlays, OVERLAY_CACHE_MAX);
-    if (slot < 0)
-        return 0;
-
-    if (g_overlays[slot].used && g_overlays[slot].tex != 0)
-        glDeleteTextures(1, &g_overlays[slot].tex);
-
-    tex = upload_surface(playlist_tile_overlay(tile->track, w, h,
+    return cache_texture(g_overlays, OVERLAY_CACHE_MAX, &g_overlay_bytes,
+                         OVERLAY_CACHE_BUDGET, tile->track, w, h, scale,
+                         version, flags,
+                         playlist_tile_overlay(tile->track, w, h,
                                                tile->selected, tile->hovered,
-                                               tile->current));
-
-    g_overlays[slot].used    = tex != 0;
-    g_overlays[slot].track   = tile->track;
-    g_overlays[slot].w       = w;
-    g_overlays[slot].h       = h;
-    g_overlays[slot].version = version;
-    g_overlays[slot].flags   = flags;
-    g_overlays[slot].tex     = tex;
-    g_overlays[slot].used_us = now;
-
-    return tex;
+                                               tile->current, scale));
 }
 
 /* ---------------- 绘制 ---------------- */
@@ -421,7 +396,23 @@ static void draw_tint(void)
     glUseProgram(0);
 }
 
-static void draw_wall(void)
+/* 磁贴纹理还在后台生成时的占位色：用封面主色压暗，避免白块。 */
+static void draw_tile_placeholder(double x, double y, double w, double h,
+                                  gsize track)
+{
+    const Palette *pal = covercache_palette(track);
+    double r = 0.055, g = 0.060, b = 0.070;
+
+    if (pal != NULL && pal->has) {
+        r = 0.020 + pal->seed_r * 0.24;
+        g = 0.022 + pal->seed_g * 0.24;
+        b = 0.026 + pal->seed_b * 0.24;
+    }
+
+    quad(x, y, w, h, 0, r, g, b, 1.0);
+}
+
+static void draw_wall(int scale)
 {
     const WallGlFrame *f = &g_frame;
     const WallGlTile  *sel = NULL;
@@ -441,11 +432,20 @@ static void draw_wall(void)
     /* 1) 非选中磁贴 */
     for (int i = 0; i < f->n_tiles; i++) {
         const WallGlTile *t = &f->tiles[i];
+        GLuint            tex;
 
         if (t == sel)
             continue;
 
-        quad(t->x, t->y, t->w, t->h, tile_texture(t), 1.0, 1.0, 1.0, t->reveal);
+        tex = tile_texture(t, scale);
+
+        if (tex == 0)
+            draw_tile_placeholder(t->x, t->y, t->w, t->h, t->track);
+        else
+            /* 磁贴纹理自己已经包含“占位底 + 封面”两个版本；封面到齐后
+             * 用新版本替换。这里不再乘 reveal，否则封面异步加载期间
+             * 整块磁贴（包括标题文字）都会是透明的。 */
+            quad(t->x, t->y, t->w, t->h, tex, 1.0, 1.0, 1.0, 1.0);
     }
 
     /* 2) 非选中的悬停 / 当前曲目标记 */
@@ -457,7 +457,7 @@ static void draw_wall(void)
 
         quad(t->x - OVERLAY_PAD, t->y - OVERLAY_PAD,
              t->w + OVERLAY_PAD * 2.0, t->h + OVERLAY_PAD * 2.0,
-             overlay_texture(t), 1.0, 1.0, 1.0, 1.0);
+             overlay_texture(t, scale), 1.0, 1.0, 1.0, 1.0);
     }
 
     /* 3) 压暗中间区域 */
@@ -482,20 +482,47 @@ static void draw_wall(void)
                  f->glow_r, f->glow_g, f->glow_b, 1.0);
         }
 
-        quad(sx, sy, sw, sh, tile_texture(sel), 1.0, 1.0, 1.0, sel->reveal);
+        {
+            GLuint stex = tile_texture(sel, scale);
+
+            if (stex == 0)
+                draw_tile_placeholder(sx, sy, sw, sh, sel->track);
+            else
+                quad(sx, sy, sw, sh, stex, 1.0, 1.0, 1.0, 1.0);
+        }
         quad(sx - OVERLAY_PAD, sy - OVERLAY_PAD,
              sw + OVERLAY_PAD * 2.0, sh + OVERLAY_PAD * 2.0,
-             overlay_texture(sel), 1.0, 1.0, 1.0, 1.0);
+             overlay_texture(sel, scale), 1.0, 1.0, 1.0, 1.0);
     }
 
     glBindVertexArray(0);
     glUseProgram(0);
 }
 
+/* gtk_widget_set_opacity 每帧都调会把 GLArea 逼进离屏合成。
+ * 只在进场 / 退场时改变，稳定在 1.0。 */
+static void set_opacity(float target)
+{
+    target = (float)CLAMP(target, 0.0, 1.0);
+
+    if (target >= 0.999f)
+        target = 1.0f;
+    if (target <= 0.001f)
+        target = 0.0f;
+
+    if (g_opacity >= 0.0f && fabsf(target - g_opacity) < 0.004f &&
+        !(target == 1.0f && g_opacity != 1.0f))
+        return;
+
+    g_opacity = target;
+    gtk_widget_set_opacity(g_area, (double)target);
+}
+
 static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
 {
     int     w = gtk_widget_get_width(GTK_WIDGET(area));
     int     h = gtk_widget_get_height(GTK_WIDGET(area));
+    int     scale;
     gint64  t0 = 0;
 
     (void)context;
@@ -504,29 +531,36 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     if (!ensure_resources() || w <= 0 || h <= 0)
         return TRUE;
 
+    scale = gl_util_viewport(GTK_WIDGET(area));
+
     if (g_getenv("FOLLOW_WALL_DEBUG") != NULL)
         t0 = now_us();
 
-    /* 启动时先用 1% 透明度让 GL 层完成初始化和 shader 编译，
-     * 就绪后彻底隐藏，避免第一帧才初始化造成卡顿。 */
-    if (!g_active && gtk_widget_get_opacity(GTK_WIDGET(area)) > 0.0)
-        gtk_widget_set_opacity(GTK_WIDGET(area), 0.0);
-
-    glViewport(0, 0, w, h);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
+    /* 目标 alpha 保持不变：GLArea 整体必须是不透明的，
+     * 否则中间的压暗区会让下面的图层透出来。 */
     glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA,
-                        GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+                        GL_ZERO, GL_ONE);
 
-    glClearColor((float)g_frame.bg_r, (float)g_frame.bg_g, (float)g_frame.bg_b, 1.0f);
+    /* 关掉墙时保持 framebuffer 全透明：GLArea 仍然可以留在窗口里预热，
+     * 不会盖住下面的主画面。 */
+    if (!g_active) {
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        return TRUE;
+    }
+
+    glClearColor((float)g_frame.bg_r, (float)g_frame.bg_g,
+                 (float)g_frame.bg_b, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    if (g_active && g_frame.tint)
+    if (g_frame.tint)
         draw_tint();
 
-    if (g_active && g_frame.vis > 0.001)
-        draw_wall();
+    if (g_frame.vis > 0.001)
+        draw_wall(scale);
 
     if (t0 != 0) {
         gint64 now = now_us();
@@ -549,6 +583,28 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     }
 
     return TRUE;
+}
+
+static void on_map(GtkWidget *widget, gpointer data)
+{
+    (void)data;
+
+    /* 新映射的 GL framebuffer 是空的，强制下一帧重建。 */
+    g_frame.view_w = -1.0;
+    g_frame.view_h = -1.0;
+
+    if (g_active && g_ready && g_tick_id == 0)
+        g_tick_id = gtk_widget_add_tick_callback(widget, on_tick, NULL, NULL);
+}
+
+static void on_unmap(GtkWidget *widget, gpointer data)
+{
+    (void)data;
+
+    if (g_tick_id != 0) {
+        gtk_widget_remove_tick_callback(widget, g_tick_id);
+        g_tick_id = 0;
+    }
 }
 
 static void on_realize(GtkWidget *widget, gpointer data)
@@ -581,6 +637,39 @@ static void on_realize(GtkWidget *widget, gpointer data)
 
     if (!g_active)
         gtk_widget_set_opacity(widget, 0.0);
+
+    g_frame.view_w = -1.0;
+    g_frame.view_h = -1.0;
+
+    if (g_active && gtk_widget_get_mapped(widget) && g_tick_id == 0)
+        g_tick_id = gtk_widget_add_tick_callback(widget, on_tick, NULL, NULL);
+}
+
+/* 由 GTK 的 frame clock 驱动：在 vsync 上重建一帧并提交绘制。
+ * 16ms 泵只在 pending 时 queue_draw，让这个回调持续被调用。 */
+static gboolean on_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
+{
+    int w, h;
+
+    (void)clock;
+    (void)data;
+
+    if (!g_ready || !playlist_is_open())
+        return G_SOURCE_CONTINUE;
+
+    w = gtk_widget_get_width(widget);
+    h = gtk_widget_get_height(widget);
+
+    if (w <= 0 || h <= 0)
+        return G_SOURCE_CONTINUE;
+
+    if (!playlist_frame_pending() &&
+        w == (int)g_frame.view_w && h == (int)g_frame.view_h)
+        return G_SOURCE_CONTINUE;
+
+    playlist_build_frame((double)w, (double)h);
+
+    return G_SOURCE_CONTINUE;
 }
 
 /* ---------------- 对外接口 ---------------- */
@@ -599,14 +688,42 @@ static void frame_free(void)
     g_frame_cap = 0;
 }
 
+static void on_unrealize(GtkWidget *widget, gpointer data)
+{
+    (void)widget;
+    (void)data;
+
+    if (g_tick_id != 0) {
+        gtk_widget_remove_tick_callback(widget, g_tick_id);
+        g_tick_id = 0;
+    }
+
+    /* 上下文销毁后所有 GL 对象都失效；纹理从 playlist 的 cairo 缓存重新上传。 */
+    for (int i = 0; i < TILE_CACHE_MAX; i++)
+        memset(&g_tiles[i], 0, sizeof(g_tiles[i]));
+    for (int i = 0; i < OVERLAY_CACHE_MAX; i++)
+        memset(&g_overlays[i], 0, sizeof(g_overlays[i]));
+
+    g_tile_bytes = 0;
+    g_overlay_bytes = 0;
+    g_ready   = FALSE;
+    g_prog    = 0;
+    g_vao     = 0;
+    g_vbo     = 0;
+    g_glow    = 0;
+    g_opacity = -1.0f;
+}
+
 static void on_destroy(GtkWidget *widget, gpointer data)
 {
     (void)widget;
     (void)data;
 
     frame_free();
-    g_area   = NULL;
-    g_ready  = FALSE;
+    g_area     = NULL;
+    g_ready    = FALSE;
+    g_opacity  = -1.0f;
+    g_tick_id  = 0;
 }
 
 GtkWidget *wallgl_new(void)
@@ -614,6 +731,7 @@ GtkWidget *wallgl_new(void)
     GtkWidget *area;
 
     g_frame.selected = -1;
+    g_opacity        = -1.0f;
 
     /* 没有 GPU / 驱动不支持 GL 3.3 时的显式回退开关 */
     if (g_strcmp0(g_getenv("FOLLOW_WALLGL"), "0") == 0) {
@@ -632,7 +750,7 @@ GtkWidget *wallgl_new(void)
     gtk_widget_set_hexpand(area, TRUE);
     gtk_widget_set_vexpand(area, TRUE);
     gtk_widget_set_can_target(area, FALSE);
-    gtk_widget_set_opacity(area, 0.01);
+    gtk_widget_set_opacity(area, 0.0);
 
     gtk_gl_area_set_has_depth_buffer(GTK_GL_AREA(area), FALSE);
     gtk_gl_area_set_has_stencil_buffer(GTK_GL_AREA(area), FALSE);
@@ -645,6 +763,9 @@ GtkWidget *wallgl_new(void)
     g_signal_connect(area, "render", G_CALLBACK(on_render), NULL);
     g_signal_connect(area, "destroy", G_CALLBACK(on_destroy), NULL);
     g_signal_connect_after(area, "realize", G_CALLBACK(on_realize), NULL);
+    g_signal_connect(area, "unrealize", G_CALLBACK(on_unrealize), NULL);
+    g_signal_connect(area, "map", G_CALLBACK(on_map), NULL);
+    g_signal_connect(area, "unmap", G_CALLBACK(on_unmap), NULL);
 
     g_area = area;
 
@@ -654,6 +775,11 @@ GtkWidget *wallgl_new(void)
 gboolean wallgl_ready(void)
 {
     return g_ready;
+}
+
+int wallgl_tile_scale(void)
+{
+    return g_area != NULL ? gl_util_scale(g_area) : 1;
 }
 
 void wallgl_set_frame(const WallGlFrame *frame)
@@ -676,13 +802,13 @@ void wallgl_set_frame(const WallGlFrame *frame)
         copy = keep;
     }
 
-    g_frame      = *frame;
-    g_frame.tiles = copy;
+    g_frame        = *frame;
+    g_frame.tiles  = copy;
     g_frame.n_tiles = (n > 0 && copy != NULL) ? n : 0;
-    g_frame_cap  = cap;
-    g_active     = TRUE;
+    g_frame_cap    = cap;
+    g_active       = TRUE;
 
-    gtk_widget_set_opacity(g_area, CLAMP(frame->vis, 0.0, 1.0));
+    set_opacity((float)frame->vis);
     gtk_widget_queue_draw(g_area);
 }
 
@@ -693,9 +819,17 @@ void wallgl_set_active(gboolean active)
 
     g_active = active;
 
-    if (!active) {
+    if (active) {
+        if (g_ready && gtk_widget_get_mapped(g_area) && g_tick_id == 0)
+            g_tick_id = gtk_widget_add_tick_callback(g_area, on_tick, NULL, NULL);
+    } else {
+        if (g_tick_id != 0) {
+            gtk_widget_remove_tick_callback(g_area, g_tick_id);
+            g_tick_id = 0;
+        }
+
         frame_free();
-        gtk_widget_set_opacity(g_area, 0.0);
+        set_opacity(0.0f);
     }
 
     gtk_widget_queue_draw(g_area);
@@ -706,9 +840,13 @@ void wallgl_clear(void)
     frame_free();
 
     for (int i = 0; i < TILE_CACHE_MAX; i++)
-        g_tiles[i].used = FALSE;
+        memset(&g_tiles[i], 0, sizeof(g_tiles[i]));
     for (int i = 0; i < OVERLAY_CACHE_MAX; i++)
-        g_overlays[i].used = FALSE;
+        memset(&g_overlays[i], 0, sizeof(g_overlays[i]));
 
-    g_area = NULL;
+    g_tile_bytes    = 0;
+    g_overlay_bytes = 0;
+    g_area          = NULL;
+    g_opacity       = -1.0f;
+    g_tick_id       = 0;
 }

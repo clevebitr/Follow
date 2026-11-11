@@ -94,6 +94,9 @@ static struct {
     /* 最近一帧的进场 / 退场进度；GL 与 chrome 层共用 */
     double   vis;
     gboolean gl_chrome;      /* 当前帧墙由 GL 层绘制，chrome 层负责表头 / 底栏 */
+    gboolean frame_dirty;    /* GL 墙需要重建一帧 */
+    int      last_track;     /* 当前曲目变化时刷新“正在播放”标记 */
+    int      last_chrome_track; /* 表头 / 底栏当前展示的 focus 曲目 */
 
     PlHit    hit[PL_MAX_HITS];
     int      n_hits;
@@ -236,6 +239,9 @@ static void block_order(guint32 h, int n, int count, int *order)
 
 static void update_metrics(double w, double h)
 {
+    if (w != P.screen_w || h != P.screen_h)
+        P.frame_dirty = TRUE;
+
     P.screen_w  = w;
     P.screen_h  = h;
     P.pad_x     = clampd(w * 0.035, 18.0, 64.0);
@@ -322,6 +328,7 @@ static void focus_set_instance(int bx, int by, int slot, int track, gboolean cen
     P.focus_slot  = slot;
     P.focus_track = track;
     P.sel_us      = now_us();
+    P.frame_dirty = TRUE;
 
     focus_refresh_world();
 
@@ -673,9 +680,7 @@ void playlist_pan_update(double offset_x, double offset_y)
     P.cam_tx = P.cam_x;
     P.cam_ty = P.cam_y;
 
-    if (app.canvas != NULL)
-        gtk_widget_queue_draw(app.canvas);
-    ui_request_redraw();
+    playlist_request_frame();
 }
 
 void playlist_pan_end(double offset_x, double offset_y)
@@ -711,7 +716,7 @@ void playlist_pan_end(double offset_x, double offset_y)
     }
 
     ui_animate();
-    ui_request_redraw();
+    playlist_request_frame();
 }
 
 void playlist_pan_by(double dx, double dy)
@@ -732,7 +737,7 @@ void playlist_pan_by(double dx, double dy)
     }
 
     ui_animate();
-    ui_request_redraw();
+    playlist_request_frame();
 }
 
 gboolean playlist_was_dragging(void)
@@ -911,6 +916,7 @@ typedef struct {
     cairo_surface_t *surface;
     gsize            track;
     int              w, h;
+    int              scale;      /* 1 = 逻辑像素，2 = HiDPI 设备像素渲染 */
     gint64           version;
     gint64           used_us;
     gboolean         used;
@@ -924,6 +930,7 @@ typedef struct {
     cairo_surface_t *surface;
     gsize            track;
     int              w, h;
+    int              scale;
     gint64           version;
     guint            flags;
     gint64           used_us;
@@ -954,7 +961,30 @@ static void tile_cache_clear(void)
     }
 }
 
-static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version)
+static cairo_surface_t *tile_cache_find(gsize track, int w, int h,
+                                       gint64 version, int scale)
+{
+    if (w < 8 || h < 8)
+        return NULL;
+
+    scale = CLAMP(scale, 1, 3);
+
+    for (int i = 0; i < PL_TILE_CACHE_MAX; i++) {
+        if (g_tile_cache[i].used &&
+            g_tile_cache[i].track == track &&
+            g_tile_cache[i].w == w && g_tile_cache[i].h == h &&
+            g_tile_cache[i].scale == scale &&
+            g_tile_cache[i].version == version) {
+            g_tile_cache[i].used_us = now_us();
+            return g_tile_cache[i].surface;
+        }
+    }
+
+    return NULL;
+}
+
+static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version,
+                                       int scale)
 {
     cairo_surface_t *surface;
     cairo_t         *cr;
@@ -963,15 +993,11 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     if (w < 8 || h < 8)
         return NULL;
 
-    for (int i = 0; i < PL_TILE_CACHE_MAX; i++) {
-        if (g_tile_cache[i].used &&
-            g_tile_cache[i].track == track &&
-            g_tile_cache[i].w == w && g_tile_cache[i].h == h &&
-            g_tile_cache[i].version == version) {
-            g_tile_cache[i].used_us = now_us();
-            return g_tile_cache[i].surface;
-        }
-    }
+    scale = CLAMP(scale, 1, 3);
+
+    surface = tile_cache_find(track, w, h, version, scale);
+    if (surface != NULL)
+        return surface;
 
     for (int i = 0; i < PL_TILE_CACHE_MAX; i++) {
         if (!g_tile_cache[i].used) {
@@ -987,7 +1013,7 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
 
     g_clear_pointer(&g_tile_cache[slot].surface, cairo_surface_destroy);
 
-    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * scale, h * scale);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surface);
         g_tile_cache[slot].used = FALSE;
@@ -995,6 +1021,7 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     }
 
     cr = cairo_create(surface);
+    cairo_scale(cr, scale, scale);
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
     draw_tile_content(cr, track, 0.0, 0.0, (double)w, (double)h, TRUE);
@@ -1005,11 +1032,116 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     g_tile_cache[slot].track   = track;
     g_tile_cache[slot].w       = w;
     g_tile_cache[slot].h       = h;
+    g_tile_cache[slot].scale   = scale;
     g_tile_cache[slot].version = version;
     g_tile_cache[slot].used_us = now_us();
     g_tile_cache[slot].used    = TRUE;
 
     return surface;
+}
+
+/* ---------------- 磁贴异步预热 ----------------
+ * 2K / 4K 上一张磁贴要重排 Pango、缩放封面，单张 2-4ms。整屏 40+ 张
+ * 同步渲染会把打开墙卡住 100ms 以上，快速拖动时也会丢帧。这里把
+ * “生成 cairo 磁贴”放进低优先级空闲任务，每轮只吃几毫秒，生成完
+ * 再通知 wallgl 上传纹理。 */
+
+typedef struct {
+    gsize track;
+    int   w, h, scale;
+} PlTileJob;
+
+static GQueue g_tile_jobs = G_QUEUE_INIT;
+static guint  g_tile_job_id;
+
+static gboolean tile_job_step(gpointer data);
+
+void playlist_tile_request(gsize track, int w, int h, int scale)
+{
+    gint64 version;
+
+    if (w < 8 || h < 8)
+        return;
+
+    version = covercache_version(track);
+
+    if (tile_cache_find(track, w, h, version, scale) != NULL)
+        return;
+
+    for (GList *l = g_tile_jobs.head; l != NULL; l = l->next) {
+        PlTileJob *job = l->data;
+
+        if (job->track == track && job->w == w && job->h == h &&
+            job->scale == scale)
+            return;
+    }
+
+    if (g_tile_jobs.length >= 512)
+        return;
+
+    {
+        PlTileJob *job = g_new(PlTileJob, 1);
+
+        job->track = track;
+        job->w     = w;
+        job->h     = h;
+        job->scale = scale;
+        g_queue_push_tail(&g_tile_jobs, job);
+    }
+
+    if (g_tile_job_id == 0)
+        g_tile_job_id = g_timeout_add(4, tile_job_step, NULL);
+}
+
+cairo_surface_t *playlist_tile_surface_cached(gsize track, int w, int h, int scale)
+{
+    return tile_cache_find(track, w, h, covercache_version(track), scale);
+}
+
+static gboolean tile_job_step(gpointer data)
+{
+    gboolean did = FALSE;
+    gint64   start = now_us();
+
+    (void)data;
+
+    /* 每轮最多占用 ~3ms，把剩下的时间还给 60fps 动画。 */
+    while (!g_queue_is_empty(&g_tile_jobs)) {
+        PlTileJob *job = g_queue_pop_head(&g_tile_jobs);
+        gint64     version = covercache_version(job->track);
+
+        if (tile_cache_find(job->track, job->w, job->h, version,
+                            job->scale) == NULL) {
+            tile_cache_get(job->track, job->w, job->h, version, job->scale);
+            did = TRUE;
+        }
+
+        g_free(job);
+
+        if (now_us() - start >= 3000)
+            break;
+    }
+
+    if (did)
+        playlist_request_frame();
+
+    if (g_queue_is_empty(&g_tile_jobs)) {
+        g_tile_job_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+
+    return G_SOURCE_CONTINUE;
+}
+
+static void tile_jobs_clear(void)
+{
+    if (g_tile_job_id != 0) {
+        g_source_remove(g_tile_job_id);
+        g_tile_job_id = 0;
+    }
+
+    while (!g_queue_is_empty(&g_tile_jobs))
+        g_free(g_queue_pop_head(&g_tile_jobs));
 }
 
 /* 磁贴上的标记层：当前曲目强调条 / ♪、选中描边、悬停边框。
@@ -1104,12 +1236,13 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
 
     {
         gint64           version = covercache_version(track_index);
+        cairo_surface_t *cover   = covercache_surface(track_index);
         cairo_surface_t *cached  = tile_cache_get(track_index,
                                                   (int)ceil(w), (int)ceil(h),
-                                                  version);
+                                                  version, 1);
 
         if (cached != NULL) {
-            if (covercache_surface(track_index) != NULL && reveal < 0.999) {
+            if (cover != NULL && reveal < 0.999) {
                 /* 封面正在淡入：底下先铺占位色，再把缓存整块按 alpha 叠上去 */
                 cairo_save(cr);
                 path_round_rect(cr, x, y, w, h, radius);
@@ -1123,7 +1256,9 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
             cairo_set_source_surface(cr, cached, x, y);
             cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_FAST);
 
-            if (reveal >= 0.999)
+            /* 封面还没加载好时，缓存本身就是“占位底 + 标题”的磁贴；
+             * 不能乘 reveal（0）否则整块磁贴会隐形。 */
+            if (cover == NULL || reveal >= 0.999)
                 cairo_paint(cr);
             else
                 cairo_paint_with_alpha(cr, reveal);
@@ -1139,16 +1274,11 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
         cairo_restore(cr);
 }
 
-cairo_surface_t *playlist_tile_surface(gsize track, int w, int h)
-{
-    return tile_cache_get(track, w, h, covercache_version(track));
-}
-
 /* GL 层用的标记纹理：只有选中 / 悬停 / 当前曲目时才生成。
  * 四周留 4px 给选中描边的外描边。 */
 cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
                                        gboolean selected, gboolean hovered,
-                                       gboolean current)
+                                       gboolean current, int scale)
 {
     guint           flags = (selected ? 1u : 0u) | (hovered ? 2u : 0u) |
                             (current ? 4u : 0u);
@@ -1161,9 +1291,12 @@ cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
     if (w < 8 || h < 8 || flags == 0)
         return NULL;
 
+    scale = CLAMP(scale, 1, 3);
+
     for (int i = 0; i < PL_OVERLAY_CACHE_MAX; i++) {
         if (g_overlay_cache[i].used && g_overlay_cache[i].track == track &&
             g_overlay_cache[i].w == w && g_overlay_cache[i].h == h &&
+            g_overlay_cache[i].scale == scale &&
             g_overlay_cache[i].version == version &&
             g_overlay_cache[i].flags == flags) {
             g_overlay_cache[i].used_us = now;
@@ -1184,7 +1317,8 @@ cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
 
     g_clear_pointer(&g_overlay_cache[slot].surface, cairo_surface_destroy);
 
-    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w + 8, h + 8);
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                         (w + 8) * scale, (h + 8) * scale);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surface);
         g_overlay_cache[slot].used = FALSE;
@@ -1192,6 +1326,7 @@ cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
     }
 
     cr = cairo_create(surface);
+    cairo_scale(cr, scale, scale);
     cairo_translate(cr, 4.0, 4.0);
     draw_tile_decoration(cr, track, 0.0, 0.0, (double)w, (double)h,
                          selected, hovered, current);
@@ -1201,6 +1336,7 @@ cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
     g_overlay_cache[slot].track   = track;
     g_overlay_cache[slot].w       = w;
     g_overlay_cache[slot].h       = h;
+    g_overlay_cache[slot].scale   = scale;
     g_overlay_cache[slot].version = version;
     g_overlay_cache[slot].flags   = flags;
     g_overlay_cache[slot].used_us = now;
@@ -1549,7 +1685,7 @@ static void warm_tile_cache(double w, double h)
 {
     const APPconfig *cfg = config_get();
     int              n   = (int)cfg->n_tracks;
-    double           overscan = P.cell * 2.0;
+    double           overscan = P.cell * 0.8;
 
     if (n <= 0)
         return;
@@ -1574,11 +1710,21 @@ static void warm_tile_cache(double w, double h)
                     continue;
 
                 covercache_surface((gsize)order[s]);
-                tile_cache_get((gsize)order[s],
-                               (int)ceil(ww), (int)ceil(wh),
-                               covercache_version((gsize)order[s]));
+                playlist_tile_request((gsize)order[s],
+                                      (int)ceil(ww), (int)ceil(wh),
+                                      wallgl_ready() ? wallgl_tile_scale() : 1);
             }
         }
+    }
+
+    /* 选中 / focus 的那一张先同步画出来，进场第一帧就有内容；
+     * 其余磁贴由低优先级队列补上。 */
+    if (P.focus_valid) {
+        int scale = wallgl_ready() ? wallgl_tile_scale() : 1;
+
+        tile_cache_get((gsize)P.focus_track,
+                       (int)ceil(P.focus_ww), (int)ceil(P.focus_wh),
+                       covercache_version((gsize)P.focus_track), scale);
     }
 }
 
@@ -1587,9 +1733,12 @@ static void warm_tile_cache(double w, double h)
 void playlist_open_page(void)
 {
     const APPconfig *cfg = config_get();
+    gint64           t0, t_covers, t_tiles;
 
     if (P.open || P.closing)
         return;
+
+    t0 = now_us();
 
     covercache_sync();
 
@@ -1597,6 +1746,8 @@ void playlist_open_page(void)
     P.closing     = FALSE;
     P.vis         = 0.0;
     P.gl_chrome   = FALSE;
+    P.frame_dirty = TRUE;
+    P.last_track  = app.track;
     P.seed        = (guint32)g_random_int() | 1u;
     P.dragging    = FALSE;
     P.drag_moved  = FALSE;
@@ -1625,9 +1776,9 @@ void playlist_open_page(void)
         focus_find_track(app.track >= 0 ? app.track : 0, start_bx, start_by, 3);
     }
 
-    /* 预载所有封面：鼠标把选中磁贴拖出相机、focus 换到别的磁贴后，置色也有色可用 */
-    for (gsize i = 0; i < cfg->n_tracks; i++)
-        covercache_surface(i);
+    /* 封面异步加载：这里不再同步解码所有 track，打开墙不会因为封面 / 调色板
+     * 解码而卡住；可见磁贴先用占位色，封面到了再自动刷新。 */
+    t_covers = now_us();
 
     focus_center_camera(TRUE);
 
@@ -1636,6 +1787,15 @@ void playlist_open_page(void)
 
         view_size(&vw, &vh);
         warm_tile_cache(vw, vh);
+    }
+
+    t_tiles = now_us();
+
+    if (g_getenv("FOLLOW_WALL_DEBUG") != NULL) {
+        g_message("playlist: open covers %.1f ms, tiles %.1f ms, total %.1f ms",
+                  (double)(t_covers - t0) / 1000.0,
+                  (double)(t_tiles - t_covers) / 1000.0,
+                  (double)(t_tiles - t0) / 1000.0);
     }
 
     P.last_draw_us = now_us();
@@ -1651,6 +1811,7 @@ void playlist_open_page(void)
     wallgl_set_active(TRUE);
     ui_animate();
     ui_request_redraw();
+    ui_sync_layers();
 }
 
 void playlist_close(void)
@@ -1660,6 +1821,7 @@ void playlist_close(void)
 
     P.dragging = FALSE;
     P.pan_vx   = P.pan_vy = 0.0;
+    P.frame_dirty = TRUE;
 
     if (config_animations()) {
         P.closing = TRUE;
@@ -1672,6 +1834,7 @@ void playlist_close(void)
     }
 
     ui_request_redraw();
+    ui_sync_layers();
 }
 
 void playlist_toggle(void)
@@ -1713,6 +1876,45 @@ gboolean playlist_animating(void)
         return TRUE;
 
     return FALSE;
+}
+
+gboolean playlist_chrome_animating(void)
+{
+    if (!P.open)
+        return FALSE;
+
+    if (fx_running(&P.enter_fx))
+        return TRUE;
+    if (P.closing && fx_running(&P.close_fx))
+        return TRUE;
+
+    return FALSE;
+}
+
+void playlist_request_frame(void)
+{
+    if (!P.open)
+        return;
+
+    P.frame_dirty = TRUE;
+
+    /* GL 墙由 ui_animate() 的 16ms 泵重建；cairo 回退仍然要靠画布重绘。 */
+    if (!wallgl_ready() && app.canvas != NULL)
+        gtk_widget_queue_draw(app.canvas);
+
+    ui_request_redraw();
+    ui_animate();
+}
+
+gboolean playlist_frame_pending(void)
+{
+    if (!P.open)
+        return FALSE;
+
+    if (P.frame_dirty)
+        return TRUE;
+
+    return playlist_animating();
 }
 
 void playlist_move(gint dx, gint dy)
@@ -1844,11 +2046,15 @@ void playlist_hover(double x, double y)
         }
     }
 
-    if (changed && app.canvas != NULL) {
-        gtk_widget_set_cursor_from_name(app.canvas,
-                                        P.hover_valid ? "pointer" : NULL);
-        gtk_widget_queue_draw(app.canvas);
-        ui_request_redraw();
+    if (changed) {
+        GtkWidget *input = (wallgl_ready() && app.chrome != NULL)
+            ? app.chrome : app.canvas;
+
+        if (input != NULL)
+            gtk_widget_set_cursor_from_name(input,
+                                            P.hover_valid ? "pointer" : NULL);
+
+        playlist_request_frame();
     }
 }
 
@@ -1863,6 +2069,18 @@ static double playlist_frame_update(double w, double h)
     covercache_sync();
     update_metrics(w, h);
     focus_refresh_world();
+
+    if (app.track != P.last_track) {
+        P.last_track  = app.track;
+        P.frame_dirty = TRUE;
+    }
+
+    if (P.focus_track != P.last_chrome_track) {
+        P.last_chrome_track = P.focus_track;
+
+        if (app.chrome != NULL)
+            gtk_widget_queue_draw(app.chrome);
+    }
 
     now = now_us();
     dt  = (double)(now - P.last_draw_us) / 1000000.0;
@@ -1908,13 +2126,14 @@ static double playlist_frame_update(double w, double h)
     close_p = P.closing ? (config_animations() ? fx_t(&P.close_fx) : 1.0) : 0.0;
 
     if (P.closing && close_p >= 1.0) {
+
         P.open    = FALSE;
         P.closing = FALSE;
         P.vis     = 0.0;
         fx_stop(&P.close_fx);
-        tile_cache_clear();
         wallgl_set_active(FALSE);
         ui_request_redraw();
+        ui_sync_layers();
         return 0.0;
     }
 
@@ -2093,8 +2312,8 @@ void playlist_build_frame(double w, double h)
     }
 
     wallgl_set_frame(&f);
-
-    P.gl_chrome = TRUE;
+    P.frame_dirty = FALSE;
+    P.gl_chrome   = TRUE;
 }
 
 void playlist_draw_chrome(cairo_t *cr, double w, double h)
@@ -2162,6 +2381,7 @@ void playlist_draw(cairo_t *cr, double w, double h)
 
 void playlist_clear(void)
 {
+    tile_jobs_clear();
     wallgl_clear();
     g_clear_pointer(&P.message, g_free);
     tile_cache_clear();

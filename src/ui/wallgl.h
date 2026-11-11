@@ -54,6 +54,7 @@ typedef struct {
 
 GtkWidget *wallgl_new(void);
 gboolean   wallgl_ready(void);
+int        wallgl_tile_scale(void);   /* 磁贴纹理的设备像素倍率 */
 void       wallgl_set_frame(const WallGlFrame *frame);
 void       wallgl_set_active(gboolean active);
 void       wallgl_clear(void);

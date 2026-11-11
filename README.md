@@ -50,6 +50,24 @@
 - 不满一个 block 的空位用低对比度 `FOLLOW` 装饰磁贴补齐
 - 开关键、关闭键以及所有播放快捷键都能在 `[keys]` 里改
 
+### 性能 / 硬件加速
+
+- **Windows 默认打开 DirectComposition**：GTK 4.24 的 Win32 后端默认不创建 DComp 设备，
+  GSK 会一直退回 cairo 软件合成，2K 全屏时每帧都要把 GL 纹理读回内存。程序启动时自动往
+  `GDK_DEBUG` 里追加 `dcomp`，GSK 才会用 GL 渲染器。驱动不支持时 GTK 会自己回退；
+  想强制关掉可以设 `FOLLOW_DCOMP=0` 或 `GSK_RENDERER=cairo`。
+- **歌曲墙**：cairo 只把每首歌预渲染成磁贴纹理，相机平移 / 选中弹出 / 压暗 / 淡入全在
+  `GtkGLArea` 里由 GPU 合成；打不开 OpenGL 3.3 或设 `FOLLOW_WALLGL=0` 时退回整屏 cairo。
+- **动态背景**：模糊封面只生成一次，三团漂移光斑、音频粒子和压暗全部在 shader /
+  加色 sprite 里画；GL 失败或 `FOLLOW_BACKDROPGL=0` 时退回原来的 CPU 小纹理 + `GtkPicture`。
+- 封面解码、磁贴纹理生成都放到后台线程 / 低优先级队列；2K / 4K 上磁贴按设备像素渲染，
+  打开墙不再同步卡住，快速拖动也不会临时排 Pango。
+- `FOLLOW_WALL_DEBUG=1` 会打印墙的帧率 / 帧时间 / 纹理上传数。
+
+> 开发调试：`FOLLOW_WALL_AUTO=1` 启动后自动开墙，`FOLLOW_EXIT_MS=8000` 定时退出，
+> `FOLLOW_WALL_AUTO_PAN=1` 持续平移，`FOLLOW_WALL_AUTO_CLOSE` / `FOLLOW_WALL_AUTO_REOPEN`
+> 用来复现「开墙 → 关墙 → 再开墙」的性能问题。
+
 ### 二维码
 
 - 网络曲目自动生成一张，下面挂**各家官方字标**（BILIBILI / APPLE MUSIC / YOUTUBE / SPOTIFY / SOUNDCLOUD / BANDCAMP）

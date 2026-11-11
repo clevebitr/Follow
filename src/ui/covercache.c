@@ -18,6 +18,7 @@
 #include "config.h"
 #include "cover.h"
 #include "http.h"
+#include "playlist.h"
 #include "texture.h"
 #include "ui.h"
 
@@ -34,12 +35,16 @@ typedef struct {
 } CoverEntry;
 
 typedef struct {
-    guint   gen;
-    gsize   index;
-    gchar  *url;
-    gchar  *cache_path;
-    GBytes *bytes;
-    gchar  *error;
+    guint            gen;
+    gsize            index;
+    gchar           *path;        /* 本地图片 / 远程磁盘缓存 */
+    gchar           *url;         /* 远程地址，本地图为 NULL */
+    gchar           *cache_path;  /* 远程下载后写到这 */
+    cairo_surface_t *surface;
+    Palette          palette;
+    gboolean         has_palette;
+    gboolean         downloaded;
+    gchar           *error;
 } CoverJob;
 
 static CoverEntry *g_entries = NULL;
@@ -84,7 +89,9 @@ void covercache_sync(void)
     }
 }
 
-static gboolean decode_pixbuf(GdkPixbuf *pixbuf, CoverEntry *entry)
+/* 解码 + 取色 + 缩放到缓存尺寸。纯 CPU / cairo 操作，可以在后台线程跑。 */
+static gboolean decode_pixbuf(GdkPixbuf *pixbuf, cairo_surface_t **out_surface,
+                              Palette *out_palette, gboolean *out_has_palette)
 {
     const int     w      = gdk_pixbuf_get_width(pixbuf);
     const int     h      = gdk_pixbuf_get_height(pixbuf);
@@ -110,37 +117,73 @@ static gboolean decode_pixbuf(GdkPixbuf *pixbuf, CoverEntry *entry)
         }
     }
 
-    palette_from_rgba(rgba, w, h, &entry->palette);
-    entry->has_palette = entry->palette.has;
-
-    entry->surface = rgba_to_cairo_surface_fit(rgba, w, h, COVERCACHE_MAX_DIM);
+    palette_from_rgba(rgba, w, h, out_palette);
+    *out_has_palette = out_palette->has;
+    *out_surface = rgba_to_cairo_surface_fit(rgba, w, h, COVERCACHE_MAX_DIM);
     g_free(rgba);
 
-    if (entry->surface != NULL) {
-        entry->ready_us = g_get_monotonic_time();
-        g_cover_gen++;
-        return TRUE;
-    }
-
-    return FALSE;
+    return *out_surface != NULL;
 }
 
-static void load_local(gsize index, const AudioTrack *track, CoverEntry *entry)
+static gboolean covercache_done(gpointer data);
+
+static gpointer covercache_thread(gpointer data)
 {
-    g_autofree gchar *path = config_to_local_path(track->pic);
-    GdkPixbuf        *pixbuf = path != NULL ? gdk_pixbuf_new_from_file(path, NULL) : NULL;
+    CoverJob *job = data;
+    GdkPixbuf *pixbuf = NULL;
 
-    (void)index;
+    /* 1) 本地文件或远程磁盘缓存 */
+    if (job->path != NULL && g_file_test(job->path, G_FILE_TEST_EXISTS)) {
+        pixbuf = gdk_pixbuf_new_from_file(job->path, NULL);
 
-    entry->attempted = TRUE;
-
-    if (pixbuf == NULL) {
-        g_warning("covercache: cannot load %s", track->pic);
-        return;
+        if (pixbuf == NULL)
+            g_unlink(job->path);   /* 缓存坏了，删掉重下 */
     }
 
-    decode_pixbuf(pixbuf, entry);
-    g_object_unref(pixbuf);
+    /* 2) 远程下载 */
+    if (pixbuf == NULL && job->url != NULL && *job->url != '\0') {
+        HttpResponse resp = { 0 };
+
+        if (http_get(job->url, &resp, 20) == 0 && resp.status == 200) {
+            if (job->cache_path != NULL) {
+                g_file_set_contents(job->cache_path, resp.body, resp.length, NULL);
+                job->downloaded = TRUE;
+            }
+
+            {
+                GInputStream *stream = g_memory_input_stream_new_from_data(
+                    resp.body, resp.length, NULL);
+                GError *error = NULL;
+
+                pixbuf = gdk_pixbuf_new_from_stream(stream, NULL, &error);
+                g_object_unref(stream);
+
+                if (pixbuf == NULL)
+                    job->error = g_strdup(error != NULL ? error->message
+                                                       : "cannot decode image");
+                g_clear_error(&error);
+            }
+        } else if (resp.error[0] != 0) {
+            job->error = g_strdup(resp.error);
+        } else {
+            job->error = g_strdup_printf("HTTP %ld", resp.status);
+        }
+
+        http_response_free(&resp);
+    }
+
+    if (pixbuf != NULL) {
+        if (!decode_pixbuf(pixbuf, &job->surface, &job->palette,
+                           &job->has_palette) && job->error == NULL)
+            job->error = g_strdup("cannot decode image");
+        g_object_unref(pixbuf);
+    }
+
+    if (job->surface == NULL && job->error == NULL)
+        job->error = g_strdup("no cover file");
+
+    g_idle_add(covercache_done, job);
+    return NULL;
 }
 
 static gboolean covercache_done(gpointer data)
@@ -155,34 +198,28 @@ static gboolean covercache_done(gpointer data)
         entry->loading   = FALSE;
         entry->attempted = TRUE;
 
-        if (job->bytes != NULL) {
-            g_autoptr(GError) error  = NULL;
-            GInputStream     *stream = g_memory_input_stream_new_from_bytes(job->bytes);
-            GdkPixbuf        *pixbuf = gdk_pixbuf_new_from_stream(stream, NULL, &error);
+        if (job->surface != NULL) {
+            g_clear_pointer(&entry->surface, cairo_surface_destroy);
+            entry->surface     = job->surface;
+            job->surface       = NULL;
+            entry->palette     = job->palette;
+            entry->has_palette = job->has_palette;
+            entry->ready_us    = g_get_monotonic_time();
+            g_cover_gen++;
 
-            if (pixbuf != NULL) {
-                decode_pixbuf(pixbuf, entry);
-                g_object_unref(pixbuf);
+            if (job->downloaded)
                 cache_prune_prefix("cover", config_cover_max_bytes());
-            } else {
-                g_warning("covercache: cannot decode %s: %s", job->url,
-                          error != NULL ? error->message : "unknown error");
-            }
-
-            g_object_unref(stream);
         } else {
-            g_warning("covercache: download failed %s: %s", job->url,
+            g_warning("covercache: %s: %s", job->path != NULL ? job->path : job->url,
                       job->error != NULL ? job->error : "unknown error");
         }
 
-        if (app.canvas != NULL) {
-            ui_request_redraw();
-            ui_animate();
-            gtk_widget_queue_draw(app.canvas);
-        }
+        playlist_request_frame();
+        ui_animate();
     }
 
-    g_clear_pointer(&job->bytes, g_bytes_unref);
+    g_clear_pointer(&job->surface, cairo_surface_destroy);
+    g_free(job->path);
     g_free(job->url);
     g_free(job->cache_path);
     g_free(job->error);
@@ -190,69 +227,49 @@ static gboolean covercache_done(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-static gpointer covercache_thread(gpointer data)
+static void load_local(gsize index, const AudioTrack *track, CoverEntry *entry)
 {
-    CoverJob     *job  = data;
-    HttpResponse  resp = { 0 };
+    CoverJob *job = g_new0(CoverJob, 1);
 
-    if (http_get(job->url, &resp, 20) == 0 && resp.status == 200) {
-        job->bytes = g_bytes_new(resp.body, resp.length);
+    job->gen   = g_gen;
+    job->index = index;
+    job->path  = config_to_local_path(track->pic);
 
-        if (job->cache_path != NULL) {
-            gsize         size = 0;
-            gconstpointer body = g_bytes_get_data(job->bytes, &size);
+    entry->attempted = TRUE;
 
-            g_file_set_contents(job->cache_path, body, (gssize)size, NULL);
-        }
-    } else if (resp.error[0] != 0) {
-        job->error = g_strdup(resp.error);
-    } else {
-        job->error = g_strdup_printf("HTTP %ld", resp.status);
+    if (job->path == NULL) {
+        g_warning("covercache: cannot resolve %s", track->pic);
+        g_free(job);
+        return;
     }
 
-    http_response_free(&resp);
-
-    g_idle_add(covercache_done, job);
-    return NULL;
+    entry->loading = TRUE;
+    g_thread_unref(g_thread_new("follow-covercache", covercache_thread, job));
 }
 
 static void load_remote(gsize index, const AudioTrack *track, CoverEntry *entry)
 {
-    g_autofree gchar *cache_path = follow_cache_file("cover", track->pic, "img");
+    CoverJob *job = g_new0(CoverJob, 1);
 
-    if (cache_path != NULL && g_file_test(cache_path, G_FILE_TEST_EXISTS)) {
-        GdkPixbuf *cached = gdk_pixbuf_new_from_file(cache_path, NULL);
+    job->gen        = g_gen;
+    job->index      = index;
+    job->path       = follow_cache_file("cover", track->pic, "img");
+    job->cache_path = g_strdup(job->path);
+    job->url        = cover_url_normalize(track->pic);
 
-        if (cached != NULL) {
-            entry->attempted = TRUE;
-            decode_pixbuf(cached, entry);
-            g_object_unref(cached);
-            return;
-        }
+    entry->attempted = TRUE;
 
-        /* 缓存文件坏了，删掉重下一次 */
-        g_unlink(cache_path);
+    if ((job->path == NULL || *job->path == '\0') &&
+        (job->url == NULL || *job->url == '\0')) {
+        g_free(job->path);
+        g_free(job->url);
+        g_free(job->cache_path);
+        g_free(job);
+        return;
     }
 
-    {
-        CoverJob *job = g_new0(CoverJob, 1);
-
-        job->gen        = g_gen;
-        job->index      = index;
-        job->url        = cover_url_normalize(track->pic);
-        job->cache_path = g_steal_pointer(&cache_path);
-
-        if (job->url == NULL || *job->url == '\0') {
-            entry->attempted = TRUE;
-            g_free(job->url);
-            g_free(job->cache_path);
-            g_free(job);
-            return;
-        }
-
-        entry->loading = TRUE;
-        g_thread_unref(g_thread_new("follow-covercache", covercache_thread, job));
-    }
+    entry->loading = TRUE;
+    g_thread_unref(g_thread_new("follow-covercache", covercache_thread, job));
 }
 
 cairo_surface_t *covercache_surface(gsize index)
