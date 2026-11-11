@@ -30,6 +30,9 @@ void player_restart(void);       /* R */
 void player_stop(void);          /* S */
 void player_seek_by(double delta);
 
+/* 绝对跳转（uidbg / 调试用）：超出时长的会被夹到结尾前 */
+void player_seek_to(double seconds);
+
 void player_cycle_repeat(void);  /* L：off → all → one */
 void player_toggle_shuffle(void);/* H */
 

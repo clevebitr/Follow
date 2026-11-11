@@ -431,6 +431,7 @@ static void run_item(PaletteItem *item)
         app.chrome_dirty = TRUE;
         palette_close();
         ui_request_redraw();
+        ui_sync_layers();
         break;
     case ACT_FULLSCREEN:
         palette_close();

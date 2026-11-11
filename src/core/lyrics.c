@@ -63,30 +63,230 @@ static gboolean parse_timestamp(const gchar *tag, gint64 *out_ms)
     return TRUE;
 }
 
-/* 去掉行内的 <mm:ss.xx> 标记 */
-static void strip_inline_timestamps(gchar *text)
-{
-    gchar *r = text, *w = text;
+/* 一段带时间的词：增强 LRC 的 <mm:ss.xx>、网易云 yrc 的 (start,dur,0) */
+typedef struct {
+    gint64 ms;      /* 起始时间 */
+    gint64 end_ms;  /* 结束时间（0 = 未知，用下一个词的起始 / 行尾） */
+    guint  off;     /* 在整行文本里的字节偏移 */
+    guint  len;     /* 字节数 */
+} RawWord;
 
-    while (*r != '\0') {
-        if (*r == '<') {
-            gchar *close = strchr(r, '>');
+static GArray *words_new(void)
+{
+    return g_array_new(FALSE, TRUE, sizeof(RawWord));
+}
+
+/* 表项可能是 NULL（这行没有逐字时间），释放时要能接住 */
+static void words_table_free(gpointer p)
+{
+    if (p != NULL)
+        g_array_unref(p);
+}
+
+static void word_add(GArray *words, gint64 ms, gint64 end_ms, guint off, guint len)
+{
+    RawWord w;
+
+    if (len == 0)
+        return;
+
+    w.ms     = ms;
+    w.end_ms = end_ms;
+    w.off    = off;
+    w.len    = len;
+    g_array_append_val(words, w);
+}
+
+/* 把每段的结束时间补成"下一个词的起始"（最后一段留 0 = 未知） */
+static void words_fill_ends(GArray *words)
+{
+    for (guint i = 0; i + 1 < words->len; i++) {
+        RawWord *cur = &g_array_index(words, RawWord, i);
+
+        if (cur->end_ms <= cur->ms)
+            cur->end_ms = g_array_index(words, RawWord, i + 1).ms;
+    }
+}
+
+/* 去掉行内的 <mm:ss.xx> 标记，同时把每个 <...> 之后的文本段收成一个词：
+ *   [00:12.00]<00:12.00>あ<00:12.50>い → 两个词，各有自己的起始时间 */
+static gchar *strip_inline_words(const gchar *text, gint64 line_start, GArray **out_words)
+{
+    GString *out = g_string_sized_new(strlen(text) + 1);
+    GArray  *words = words_new();
+    gint64   pending = line_start;
+    guint    seg_start = 0;
+    const gchar *p = text;
+
+    while (*p != '\0') {
+        if (*p == '<') {
+            const gchar *close = strchr(p, '>');
 
             if (close != NULL) {
-                g_autofree gchar *inner = g_strndup(r + 1, (gsize)(close - r - 1));
+                g_autofree gchar *inner = g_strndup(p + 1, (gsize)(close - p - 1));
                 gint64             ms = 0;
 
                 if (parse_timestamp(inner, &ms)) {
-                    r = close + 1;
+                    /* 收尾上一段（行首的 <t> 之前那段没有自己的时间，用行起始） */
+                    word_add(words, pending, 0, seg_start, out->len - seg_start);
+
+                    pending   = ms;
+                    seg_start = out->len;
+                    p         = close + 1;
                     continue;
                 }
             }
         }
 
-        *w++ = *r++;
+        g_string_append_c(out, *p++);
     }
 
-    *w = '\0';
+    word_add(words, pending, 0, seg_start, out->len - seg_start);
+    words_fill_ends(words);
+
+    if (words->len < 2) {
+        g_array_unref(words);
+        words = NULL;
+    }
+
+    if (out_words != NULL)
+        *out_words = words;
+    else if (words != NULL)
+        g_array_unref(words);
+
+    return g_string_free(out, FALSE);
+}
+
+/* 解析一个没有前导的整数（yrc 用），成功返回 TRUE 并前移 *pp */
+static gboolean parse_bare_int(const gchar **pp, gint64 *out)
+{
+    const gchar *p = *pp;
+    gint64       v = 0;
+    int          digits = 0;
+
+    while (g_ascii_isdigit(*p)) {
+        v = v * 10 + (*p - '0');
+        p++;
+        digits++;
+    }
+
+    if (digits == 0)
+        return FALSE;
+
+    *out = v;
+    *pp  = p;
+    return TRUE;
+}
+
+/* yrc 的一个词头：(start,dur[,flags]) */
+static gboolean parse_word_group(const gchar **pp, gint64 *start, gint64 *end_ms)
+{
+    const gchar *p = *pp;
+    gint64       dur = 0, flags = 0;
+
+    if (*p != '(')
+        return FALSE;
+    p++;
+
+    if (!parse_bare_int(&p, start) || *p != ',')
+        return FALSE;
+    p++;
+    if (!parse_bare_int(&p, &dur))
+        return FALSE;
+
+    if (*p == ',') {
+        p++;
+        if (!parse_bare_int(&p, &flags))
+            return FALSE;
+    }
+
+    if (*p != ')')
+        return FALSE;
+    p++;
+
+    *end_ms = dur > 0 ? *start + dur : 0;
+    *pp     = p;
+    return TRUE;
+}
+
+/* 网易云逐字歌词（yrc）：
+ *   [行起始,行时长](词起始,词时长,0)字(词起始,词时长,0)字...
+ * 词时间是绝对毫秒。返回 TRUE 表示这行是 yrc。 */
+static gboolean parse_yrc_line(const gchar *line, gint64 *out_start,
+                               gchar **out_text, GArray **out_words)
+{
+    const gchar *p = line;
+    gint64       start = 0, dur = 0;
+    GString     *text;
+    GArray      *words;
+
+    if (*p != '[')
+        return FALSE;
+
+    p++;
+    if (!parse_bare_int(&p, &start) || *p != ',')
+        return FALSE;
+    p++;
+    if (!parse_bare_int(&p, &dur) || *p != ']')
+        return FALSE;
+    p++;
+
+    text  = g_string_new(NULL);
+    words = words_new();
+
+    while (*p != '\0') {
+        const gchar *next = p;
+        gint64       ws = 0, we = 0;
+        guint        off;
+
+        if (!parse_word_group(&next, &ws, &we)) {
+            /* 后面不是词头了：把剩下的文本补到最后一个词上，别把歌词吃掉 */
+            if (words->len > 0) {
+                RawWord *last = &g_array_index(words, RawWord, words->len - 1);
+
+                g_string_append(text, p);
+                last->len = text->len - last->off;
+            }
+            break;
+        }
+
+        off = text->len;
+        p   = next;      /* 文本从词头后面开始 */
+
+        /* 这一段一直延伸到下一个词头（'(数字'）为止 */
+        {
+            const gchar *seg_end = p;
+
+            while (*seg_end != '\0') {
+                if (*seg_end == '(' && g_ascii_isdigit(seg_end[1]))
+                    break;
+                seg_end++;
+            }
+
+            g_string_append_len(text, p, (gssize)(seg_end - p));
+            word_add(words, ws, we, off, (guint)(seg_end - p));
+            p = seg_end;
+        }
+    }
+
+    if (words->len == 0) {
+        g_array_unref(words);
+        g_string_free(text, TRUE);
+        return FALSE;
+    }
+
+    words_fill_ends(words);
+
+    if (words->len < 2) {
+        g_array_unref(words);
+        words = NULL;
+    }
+
+    *out_start = start;
+    *out_text  = g_string_free(text, FALSE);
+    *out_words = words;
+    (void)dur;
+    return TRUE;
 }
 
 /* 读文件并统一成 UTF-8（GBK/GB18030 会自动转） */
@@ -130,6 +330,7 @@ static gchar *read_text_file(const char *path)
 typedef struct {
     GPtrArray *texts;      /* gchar* */
     GArray    *times;      /* gint64，-1 = 这行没有时间戳 */
+    GPtrArray *words;      /* GArray<RawWord>* 或 NULL，和 texts 一一对应 */
     gchar     *title;
     gchar     *artist;
 } RawLyrics;
@@ -141,6 +342,7 @@ static void raw_free(RawLyrics *raw)
 
     g_ptr_array_unref(raw->texts);
     g_array_unref(raw->times);
+    g_ptr_array_unref(raw->words);
     g_free(raw->title);
     g_free(raw->artist);
     g_free(raw);
@@ -158,6 +360,7 @@ static RawLyrics *raw_from_text(const gchar *content)
     raw        = g_new0(RawLyrics, 1);
     raw->texts = g_ptr_array_new_with_free_func(g_free);
     raw->times = g_array_new(FALSE, TRUE, sizeof(gint64));
+    raw->words = g_ptr_array_new_with_free_func(words_table_free);
 
     raw_lines = g_strsplit(content, "\n", -1);
 
@@ -166,6 +369,22 @@ static RawLyrics *raw_from_text(const gchar *content)
         GArray *stamps = g_array_new(FALSE, TRUE, sizeof(gint64));
         gchar  *text;
         gint64  offset_ms = 0;
+
+        /* 网易云逐字歌词（yrc）：整行自带词级时间轴，不用再走 LRC 那套 */
+        {
+            g_autofree gchar *ytext = NULL;
+            GArray           *ywords = NULL;
+            gint64            ystart = 0;
+
+            if (parse_yrc_line(cursor, &ystart, &ytext, &ywords)) {
+                g_ptr_array_add(raw->texts, g_steal_pointer(&ytext));
+                g_array_append_val(raw->times, ystart);
+                g_ptr_array_add(raw->words, ywords);
+
+                g_array_free(stamps, TRUE);
+                continue;
+            }
+        }
 
         while (*cursor == '[') {
             gchar *close = strchr(cursor, ']');
@@ -193,31 +412,41 @@ static RawLyrics *raw_from_text(const gchar *content)
             cursor = close + 1;
         }
 
-        text = g_strdup(cursor);
-        strip_inline_timestamps(text);
-        g_strstrip(text);
+        {
+            GArray *words = NULL;
+            gint64  line_start = stamps->len > 0
+                ? g_array_index(stamps, gint64, 0) - offset_ms : 0;
 
-        if (*text == '\0' && stamps->len == 0) {
-            g_free(text);
-            g_array_free(stamps, TRUE);
-            continue;      /* 空行 / 纯元数据行 */
-        }
+            text = strip_inline_words(cursor, line_start, &words);
 
-        if (stamps->len == 0) {
-            /* 没有时间戳：也算一行，等打轴 */
-            gint64 missing = -1;
-
-            g_ptr_array_add(raw->texts, text);
-            g_array_append_val(raw->times, missing);
-        } else {
-            for (guint i = 0; i < stamps->len; i++) {
-                gint64 stamp = g_array_index(stamps, gint64, i) - offset_ms;
-
-                g_ptr_array_add(raw->texts, g_strdup(text));
-                g_array_append_val(raw->times, stamp);
+            if (*text == '\0' && stamps->len == 0) {
+                g_free(text);
+                if (words != NULL)
+                    g_array_unref(words);
+                g_array_free(stamps, TRUE);
+                continue;      /* 空行 / 纯元数据行 */
             }
 
-            g_free(text);
+            if (stamps->len == 0) {
+                /* 没有时间戳：也算一行，等打轴 */
+                gint64 missing = -1;
+
+                g_ptr_array_add(raw->texts, text);
+                g_array_append_val(raw->times, missing);
+                g_ptr_array_add(raw->words, words);
+            } else {
+                for (guint i = 0; i < stamps->len; i++) {
+                    gint64 stamp = g_array_index(stamps, gint64, i) - offset_ms;
+
+                    g_ptr_array_add(raw->texts, g_strdup(text));
+                    g_array_append_val(raw->times, stamp);
+                    g_ptr_array_add(raw->words, words != NULL ? g_array_copy(words) : NULL);
+                }
+
+                g_free(text);
+                if (words != NULL)
+                    g_array_unref(words);
+            }
         }
 
         g_array_free(stamps, TRUE);
@@ -233,10 +462,17 @@ static RawLyrics *raw_from_text(const gchar *content)
     return raw;
 }
 
+/* 构建 + 排序用：一行歌词 + 它自己的词时间表 */
+typedef struct {
+    gint64  time_ms;
+    gchar  *text;
+    GArray *words;      /* 借用 raw->words 里的元素 */
+} TmpLine;
+
 static gint compare_lines(const void *a, const void *b, gpointer user_data)
 {
-    const LyricLine *la = (const LyricLine *)a;
-    const LyricLine *lb = (const LyricLine *)b;
+    const TmpLine *la = (const TmpLine *)a;
+    const TmpLine *lb = (const TmpLine *)b;
 
     (void)user_data;
 
@@ -245,17 +481,77 @@ static gint compare_lines(const void *a, const void *b, gpointer user_data)
     return 0;
 }
 
+/* 把一行的词时间表摊平成"每个字的绝对时间"。
+ * 词内多个字按词时长线性均分；没有逐字时间的行返回 NULL（渲染时整行一起亮）。 */
+static gint64 *build_char_times(const gchar *text, GArray *words,
+                               gint64 line_start, gint64 line_end, gsize *out_n)
+{
+    gsize   n = g_utf8_strlen(text, -1);
+    gint64 *times;
+    gsize   last = 0;
+    gint64  last_end;
+
+    *out_n = n;
+
+    if (n == 0 || words == NULL || words->len < 2)
+        return NULL;
+
+    times = g_new(gint64, n);
+
+    /* 先按"整行起始"铺底，词没覆盖到的字就不会是垃圾值 */
+    for (gsize i = 0; i < n; i++)
+        times[i] = line_start;
+
+    for (guint w = 0; w < words->len; w++) {
+        const RawWord *word = &g_array_index(words, RawWord, w);
+        gint64         ws = word->ms;
+        gint64         we = word->end_ms > word->ms ? word->end_ms : 0;
+        gsize          first = g_utf8_strlen(text, (gssize)word->off);
+        gsize          count = g_utf8_strlen(text + word->off, (gssize)word->len);
+
+        if (count == 0)
+            continue;
+
+        if (we <= ws)
+            we = w + 1 < words->len ? g_array_index(words, RawWord, w + 1).ms : line_end;
+        if (we < ws)
+            we = ws;
+
+        for (gsize i = 0; i < count && first + i < n; i++) {
+            times[first + i] = count > 1
+                ? ws + (gint64)((double)(we - ws) * (double)i / (double)(count - 1))
+                : ws;
+        }
+
+        if (first + count > last) {
+            last     = first + count;
+            last_end = we;
+        }
+    }
+
+    /* 整行都没算出来（词时间无效）：当作"整行一起亮" */
+    if (last == 0) {
+        g_free(times);
+        return NULL;
+    }
+
+    /* 词没盖住的尾巴：接在最后一个词的结束时间上 */
+    for (gsize i = last; i < n; i++)
+        times[i] = last_end;
+
+    return times;
+}
+
 static Lyrics *lyrics_from_raw(RawLyrics *raw)
 {
-    Lyrics *lyrics;
+    Lyrics  *lyrics;
+    TmpLine *tmp;
+    gsize    n = 0;
 
     if (raw == NULL)
         return NULL;
 
-    lyrics = g_new0(Lyrics, 1);
-    lyrics->title  = g_strdup(raw->title);
-    lyrics->artist = g_strdup(raw->artist);
-    lyrics->lines  = g_new0(LyricLine, raw->texts->len + 1);
+    tmp = g_new0(TmpLine, raw->texts->len + 1);
 
     /* 只保留有时间戳的行（纯文本行没有时间，播放时没法用） */
     for (guint i = 0; i < raw->texts->len; i++) {
@@ -264,19 +560,39 @@ static Lyrics *lyrics_from_raw(RawLyrics *raw)
         if (ms < 0)
             continue;
 
-        lyrics->lines[lyrics->n_lines].time_ms = ms;
-        lyrics->lines[lyrics->n_lines].text    = g_strdup(g_ptr_array_index(raw->texts, i));
-        lyrics->n_lines++;
+        tmp[n].time_ms = ms;
+        tmp[n].text    = g_ptr_array_index(raw->texts, i);
+        tmp[n].words   = g_ptr_array_index(raw->words, i);
+        n++;
     }
 
-    raw_free(raw);
+    g_sort_array(tmp, n, sizeof(TmpLine), compare_lines, NULL);
 
-    if (lyrics->n_lines == 0) {
-        lyrics_free(lyrics);
+    if (n == 0) {
+        g_free(tmp);
+        raw_free(raw);
         return NULL;
     }
 
-    g_sort_array(lyrics->lines, lyrics->n_lines, sizeof(LyricLine), compare_lines, NULL);
+    lyrics         = g_new0(Lyrics, 1);
+    lyrics->title  = g_strdup(raw->title);
+    lyrics->artist = g_strdup(raw->artist);
+    lyrics->lines  = g_new0(LyricLine, n);
+
+    for (gsize i = 0; i < n; i++) {
+        gint64 line_end = i + 1 < n ? tmp[i + 1].time_ms : tmp[i].time_ms + 4000;
+
+        lyrics->lines[i].time_ms = tmp[i].time_ms;
+        lyrics->lines[i].text    = g_strdup(tmp[i].text);
+        lyrics->lines[i].char_ms = build_char_times(tmp[i].text, tmp[i].words,
+                                                    tmp[i].time_ms, line_end,
+                                                    &lyrics->lines[i].n_chars);
+        lyrics->n_lines++;
+    }
+
+    /* tmp 只借用 raw 的字符串，不负责释放 */
+    g_free(tmp);
+    raw_free(raw);
 
     return lyrics;
 }
@@ -317,8 +633,10 @@ void lyrics_free(Lyrics *lyrics)
     if (lyrics == NULL)
         return;
 
-    for (gsize i = 0; i < lyrics->n_lines; i++)
+    for (gsize i = 0; i < lyrics->n_lines; i++) {
         g_free(lyrics->lines[i].text);
+        g_free(lyrics->lines[i].char_ms);
+    }
 
     g_free(lyrics->lines);
     g_free(lyrics->title);
@@ -326,13 +644,38 @@ void lyrics_free(Lyrics *lyrics)
     g_free(lyrics);
 }
 
-const gchar *lyrics_line_at(const Lyrics *lyrics, double seconds)
+const gchar *lyrics_text_at(const Lyrics *lyrics, gssize index)
+{
+    if (lyrics == NULL || index < 0 || index >= (gssize)lyrics->n_lines)
+        return NULL;
+
+    return lyrics->lines[index].text;
+}
+
+const gint64 *lyrics_char_times(const Lyrics *lyrics, gssize index, gsize *n_chars)
+{
+    if (n_chars != NULL)
+        *n_chars = 0;
+
+    if (lyrics == NULL || index < 0 || index >= (gssize)lyrics->n_lines)
+        return NULL;
+
+    if (lyrics->lines[index].char_ms == NULL)
+        return NULL;
+
+    if (n_chars != NULL)
+        *n_chars = lyrics->lines[index].n_chars;
+
+    return lyrics->lines[index].char_ms;
+}
+
+gssize lyrics_index_at(const Lyrics *lyrics, double seconds)
 {
     gint64 at_ms;
     gsize  lo, hi;
 
     if (lyrics == NULL || lyrics->n_lines == 0)
-        return NULL;
+        return -1;
 
     at_ms = (gint64)(seconds * 1000.0);
 
@@ -348,8 +691,83 @@ const gchar *lyrics_line_at(const Lyrics *lyrics, double seconds)
             hi = mid;
     }
 
-    if (lo == 0)
+    return (gssize)lo - 1;
+}
+
+/* 空行也算一行（很多 LRC 用只有时间戳的空行标前奏 / 间奏），
+ * 但要当"有没有字"来判断 */
+static gboolean line_has_text(const Lyrics *lyrics, gsize index)
+{
+    const gchar *text = lyrics->lines[index].text;
+
+    if (text == NULL)
+        return FALSE;
+
+    for (const gchar *p = text; *p != '\0'; p++) {
+        if (!g_ascii_isspace(*p))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+const gchar *lyrics_line_at(const Lyrics *lyrics, double seconds)
+{
+    gssize index = lyrics_index_at(lyrics, seconds);
+
+    return index < 0 ? NULL : lyrics->lines[index].text;
+}
+
+gssize lyrics_next_index(const Lyrics *lyrics, gssize index)
+{
+    if (lyrics == NULL)
+        return -1;
+
+    for (gsize i = (gsize)(index + 1); i < lyrics->n_lines; i++) {
+        if (line_has_text(lyrics, i))
+            return (gssize)i;
+    }
+
+    return -1;
+}
+
+gssize lyrics_prev_index(const Lyrics *lyrics, gssize index)
+{
+    if (lyrics == NULL)
+        return -1;
+
+    for (gssize i = MIN(index, (gssize)lyrics->n_lines) - 1; i >= 0; i--) {
+        if (line_has_text(lyrics, (gsize)i))
+            return i;
+    }
+
+    return -1;
+}
+
+gssize lyrics_focus_at(const Lyrics *lyrics, double seconds)
+{
+    gssize index = lyrics_index_at(lyrics, seconds);
+
+    if (index < 0)
+        return -1;
+
+    /* 当前正好落在“只有时间戳”的空行上（前奏 / 间奏 / 换段占位）：
+     * 上一句保持在场，不把整块歌词擦掉（AMLL 的 highlightedGroups 也是这个语义） */
+    if (line_has_text(lyrics, (gsize)index))
+        return index;
+
+    return lyrics_prev_index(lyrics, index + 1);
+}
+
+const gchar *lyrics_line_next(const Lyrics *lyrics, double seconds)
+{
+    gssize index;
+
+    if (lyrics == NULL || lyrics->n_lines == 0)
         return NULL;
 
-    return lyrics->lines[lo - 1].text;
+    index = lyrics_focus_at(lyrics, seconds);
+    index = lyrics_next_index(lyrics, index);
+
+    return index < 0 ? NULL : lyrics->lines[index].text;
 }

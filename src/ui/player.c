@@ -355,6 +355,17 @@ void player_seek_by(double delta)
     ui_request_redraw();
 }
 
+void player_seek_to(double seconds)
+{
+    double duration = media_duration(&app.media);
+
+    if (!app.media.ready || duration <= 0.0)
+        return;
+
+    media_seek(&app.media, clampd(seconds, 0.0, MAX(duration - 0.5, 0.0)));
+    ui_request_redraw();
+}
+
 void player_cycle_repeat(void)
 {
     app.repeat = (app.repeat + 1) % 3;

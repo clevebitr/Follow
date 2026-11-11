@@ -16,7 +16,8 @@
 #include <epoxy/gl.h>
 #include <gtk/gtk.h>
 
-/* 歌曲墙和动态背景共用的最小 GL 工具：编译 shader、上传 cairo surface、
+/*  GL 工具：
+ * 编译 shader、上传 cairo surface、
  * 建一块单位四边形、读窗口的 HiDPI 缩放系数。
  *
  * 所有 GtkGLArea 的 render 回调里都要用 gl_util_viewport() 设置视口：
@@ -39,8 +40,8 @@ int    gl_util_viewport(GtkWidget *widget);
 
 const char *gl_util_renderer(void);
 
-/* GL_RENDERER 看起来是软件光栅化（llvmpipe / SwiftShader / GDI Generic ...）。
- * 只用来打日志，不强制回退：有些机器上软件 GL 仍然比整屏 cairo 快。 */
+/* GL_RENDERER 看起来是软件光栅化。
+ * 用来打日志，不强制回退。 */
 gboolean   gl_util_software(void);
 
 void       gl_util_log_context(const char *tag);

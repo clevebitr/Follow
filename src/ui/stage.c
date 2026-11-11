@@ -17,11 +17,14 @@
 #include "cover.h"
 #include "help.h"
 #include "layout.h"
+#include "media.h"
+#include "lyricgl.h"
 #include "player.h"
 #include "playlist.h"
 #include "qrcard.h"
 #include "stats.h"
 #include "theme.h"
+#include "uidbg.h"
 #include "ui.h"
 #include "wallgl.h"
 
@@ -46,8 +49,9 @@ static void format_span(guint seconds, gchar *buf, gsize len)
         g_snprintf(buf, len, "%um", mins);
 }
 
-/* 播放错误 > 歌词请求中 > 歌词错误 > 加载中 > 当前歌词行 */
-static const gchar *subtitle_line(Rgba *color)
+/* 播放错误 > 歌词请求中 > 歌词错误 > 加载中：这些占嵌在歌词位置上，
+ * 用普通字重、淡色，和真正的歌词区分开 */
+static const gchar *status_line(Rgba *color)
 {
     const gchar *error = media_error(&app.media);
 
@@ -74,11 +78,6 @@ static const gchar *subtitle_line(Rgba *color)
     if (media_is_loading(&app.media)) {
         *color = WHITE(0.45);
         return "LOADING";
-    }
-
-    if (app.lyric_line != NULL && *app.lyric_line != '\0') {
-        *color = WHITE(0.68);
-        return app.lyric_line;
     }
 
     return NULL;
@@ -162,53 +161,173 @@ static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gc
     draw_heatmap(cr, L, L->stats_content_x, L->stats_heat_y);
 }
 
+/* 歌词。
+ *
+ * GPU 路径（默认）：把可视区域交给 lyricgl，排版 / 自动折行 / 弹簧 / 扫描头
+ *   都在那一层里做（左对齐、按行绘制、没有辉光和模糊）。
+ *
+ * cairo 回退（没有 GL）：只画当前行 + 下一行，同样左对齐、自动折行、不发光。 */
+
+/* 当前句的高亮色：取封面种子色，但拉亮 / 提饱和到能在深色背景上认出来 */
+static Rgba seed_accent(void)
+{
+    const Palette *p = &app.palette;
+    double         r = p->has ? p->seed_r : 0.62;
+    double         g = p->has ? p->seed_g : 0.74;
+    double         b = p->has ? p->seed_b : 0.98;
+    double         mx = MAX(r, MAX(g, b));
+    double         mn = MIN(r, MIN(g, b));
+
+    /* 太暗就整体抬起（保色相）；太灰就把离灰的距离拉开一点 */
+    if (mx > 0.001 && mx < 0.72) {
+        double k = 0.72 / mx;
+
+        r *= k;
+        g *= k;
+        b *= k;
+    } else if (mx > 0.001) {
+        double k = 0.95 / mx;
+
+        r *= k;
+        g *= k;
+        b *= k;
+    }
+
+    if (mx - mn < 0.22) {
+        double avg = (r + g + b) / 3.0;
+        double sat = 0.22 / MAX(mx - mn, 0.001);
+
+        r = avg + (r - avg) * sat;
+        g = avg + (g - avg) * sat;
+        b = avg + (b - avg) * sat;
+    }
+
+    return RGBA(clampd(r, 0.0, 1.0), clampd(g, 0.0, 1.0), clampd(b, 0.0, 1.0), 1.0);
+}
+
+static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
+{
+    uidbg_begin_layer(UIDBG_LAYER_LYRIC);
+
+    /* 这一层每帧重画：先清掉上一帧的记录（GPU 路径下随后由 lyricgl
+     * 的 render 重建，cairo 路径下由下面的绘制重建） */
+    uidbg_layer_clear(UIDBG_LAYER_LYRIC);
+
+    if (lyricgl_ready()) {
+        LyricViewGeom geom;
+
+        geom.x      = L->pad_x;
+        geom.w      = L->lyric_w;
+        geom.top    = L->lyric_y;
+        geom.height = L->lyric_area_h;
+        geom.px     = L->lyric_px;
+        geom.gap    = L->lyric_px * 0.55;   /* 行距（不含行内折行的行高） */
+
+        /* 扫描头要的是"减掉歌词偏移之后"的播放位置 */
+        geom.position_ms = (media_position(&app.media) * 1000.0)
+                         - (double)app.lrc_offset_ms;
+        geom.playing     = media_is_playing(&app.media);
+        geom.accent      = seed_accent();
+
+        /* 歌词在 GPU 层画，布局 / 弹簧 / 扫描头都在 lyricgl 里；
+         * 它自己会把真实几何报给 uidbg（layer = lyric） */
+        lyricgl_set_view(app.lyrics, app.lyric_index, &geom);
+
+        uidbg_begin_layer(UIDBG_LAYER_STAGE);
+        return TRUE;
+    }
+
+    /* ---------- cairo 回退 ---------- */
+    {
+        const double t    = fx_t(&app.fx_lyric);
+        const double rise = L->lyric_px * 1.1;
+        TextStyle    cur  = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_BOLD,
+                                       L->lyric_px * 0.10, WHITE(0.96));
+        TextStyle    nxt  = TEXT_STYLE(FONT_MONO, L->lyric_next_px, PANGO_WEIGHT_BOLD,
+                                       L->lyric_next_px * 0.10, WHITE(0.45));
+        gboolean     has_cur  = app.lyric_line != NULL && *app.lyric_line != '\0';
+        gboolean     has_next = app.lyric_next != NULL && *app.lyric_next != '\0';
+        gboolean     drew     = FALSE;
+        double       y        = L->lyric_y + rise * (1.0 - t);
+
+        /* 只在歌词区域里画：不会渗到下面的提示行 / 统计卡片里 */
+        cairo_save(cr);
+        cairo_rectangle(cr, L->pad_x, L->lyric_y, L->lyric_w, L->lyric_area_h);
+        cairo_clip(cr);
+
+        if (app.lyric_prev != NULL && *app.lyric_prev != '\0' && t < 1.0) {
+            TextStyle out = cur;
+
+            out.color.a = 0.96 * (1.0 - t);
+            text_draw_block(cr, app.lyric_prev, &out, L->pad_x, y - rise * t,
+                            TEXT_LEFT, L->lyric_w, 0);
+            drew = TRUE;
+        }
+
+        if (has_cur) {
+            if (t < 1.0)
+                cur.color.a *= t;
+
+            y += text_draw_block(cr, app.lyric_line, &cur, L->pad_x, y,
+                                 TEXT_LEFT, L->lyric_w, 0);
+            drew = TRUE;
+        }
+
+        if (has_next) {
+            TextStyle ahead = nxt;
+
+            ahead.color.a *= t;
+
+            if (ahead.color.a > 0.02) {
+                if (has_cur)
+                    y += L->lyric_gap;
+
+                text_draw_block(cr, app.lyric_next, &ahead, L->pad_x, y,
+                                TEXT_LEFT, L->lyric_w, 0);
+            }
+
+            drew = TRUE;
+        }
+
+        cairo_restore(cr);
+
+        uidbg_begin_layer(UIDBG_LAYER_STAGE);
+        return drew;
+    }
+}
+
 static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
 {
     const gchar *note = current_note();
     TextStyle    style;
 
-    /* 备注：时钟上方，左对齐 */
+    /* 备注 */
     if (note != NULL) {
         style = TEXT_STYLE(FONT_MONO, L->note_px, PANGO_WEIGHT_NORMAL,
                            L->note_px * 0.16, WHITE(0.50));
         text_draw(cr, note, &style, L->pad_x, L->note_y, TEXT_LEFT, L->left_w);
     }
 
-    /* 大时钟：整屏的主角 */
+    /* 大时钟 */
     style = TEXT_STYLE(FONT_HAND, L->clock_px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
     text_draw(cr, clock_text, &style, L->pad_x, L->clock_y, TEXT_LEFT, 0.0);
 
-    /* 歌词：深色衬底 + 自动换行，居中在时钟下面 */
+    /* 歌词 / 状态：有错误或加载中就先报状态，否则画歌词 */
     {
         Rgba         color = col_dim;
-        const gchar *line  = subtitle_line(&color);
-        double       pad_x, pad_y, natural, text_w, card_w, card_h, card_x, text_h;
+        const gchar *line  = status_line(&color);
 
-        if (line == NULL)
-            return;
-
-        style = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_NORMAL,
-                           L->lyric_px * 0.10, color);
-
-        pad_x   = L->lyric_px * 0.85;
-        pad_y   = L->lyric_px * 0.45;
-        natural = text_width(cr, line, &style);
-
-        /* 留几像素余量：Pango 的宽度是像素取整的，卡得太紧会在最后一行折一个字 */
-        text_w  = MIN(L->lyric_w, natural + 8.0);
-
-        text_h = text_block_height(cr, line, &style, text_w, LYRIC_MAX_LINES);
-
-        /* 衬底 ≈ 文字宽度的 1.5 倍（长句顶着时钟宽度时自然贴住） */
-        card_w = MAX(MIN(L->lyric_w, natural) + pad_x * 2.0,
-                     MIN(L->lyric_w, natural) * 1.5);
-        card_w = MIN(card_w, L->lyric_w + pad_x * 2.0);
-        card_h = text_h + pad_y * 2.0;
-        card_x = MAX(L->pad_x, L->pad_x + (L->clock_w - card_w) * 0.5);
-
-        card_draw(cr, card_x, L->lyric_y, card_w, card_h, L->card_radius);
-        text_draw_block(cr, line, &style, card_x + card_w * 0.5, L->lyric_y + pad_y,
-                        TEXT_CENTER, text_w, LYRIC_MAX_LINES);
+        if (line != NULL) {
+            style = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_NORMAL,
+                               L->lyric_px * 0.10, color);
+            /* 和歌词同一套左对齐锚点；放不下就省略号（只占一行） */
+            text_draw_block(cr, line, &style, L->pad_x, L->lyric_y,
+                            TEXT_LEFT, L->lyric_w, 1);
+            if (lyricgl_ready())
+                lyricgl_clear();
+        } else {
+            draw_lyrics(cr, L);
+        }
     }
 }
 
@@ -297,6 +416,8 @@ static void draw_stage(cairo_t *cr, int width, int height)
                                     + (app.qr[1].text != NULL ? 1 : 0);
     Layout               L;
 
+    uidbg_begin_layer(UIDBG_LAYER_STAGE);
+
     /* 布局和绘制用同一份文字：卡片尺寸就是按它量出来的，不会再"内容比卡片高" */
     layout_compute(&L, cr, (double)width, (double)height, clock_text, n_qr, wall, stats);
 
@@ -328,7 +449,12 @@ void stage_snapshot(void)
     }
 
     cr = cairo_create(shot);
+
+    /* 快照只是给退场动画用的离屏副本：别让它把这一帧的元素再记一遍 */
+    uidbg_suppress(TRUE);
     draw_stage(cr, w, h);
+    uidbg_suppress(FALSE);
+
     cairo_destroy(cr);
 
     g_clear_pointer(&app.snapshot, cairo_surface_destroy);
@@ -349,6 +475,8 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
     if (width <= 0 || height <= 0)
         return;
 
+    uidbg_frame_begin();
+
     /* 播放列表是全屏页：盖掉 stage，只留下面那层动态背景 */
     if (playlist_is_open()) {
         /* 退出歌曲墙时把主界面垫在下面，页面淡出时能看见它 */
@@ -366,6 +494,7 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
                 draw_stage(cr, width, height);
         }
 
+        uidbg_frame_end();
         return;
     }
 
@@ -393,6 +522,8 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
 
     if (app.help)
         help_draw(cr, (double)width, (double)height);
+
+    uidbg_frame_end();
 }
 
 /* 墙的表头 / 底栏 / 帮助页：画在 GL 层上面的透明画布上，不参与磁贴绘制。 */
@@ -405,8 +536,13 @@ void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     if (width <= 0 || height <= 0 || !playlist_is_open())
         return;
 
+    uidbg_begin_layer(UIDBG_LAYER_WALL_CHROME);
+    uidbg_layer_clear(UIDBG_LAYER_WALL_CHROME);
+
     playlist_draw_chrome(cr, (double)width, (double)height);
 
-    if (app.help)
+    if (app.help) {
+        uidbg_layer_clear(UIDBG_LAYER_WALL_CHROME);
         help_draw(cr, (double)width, (double)height);
+    }
 }

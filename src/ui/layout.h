@@ -14,8 +14,6 @@
 
 #include <cairo.h>
 
-#define LYRIC_MAX_LINES 3
-
 typedef struct {
     double pad_x, pad_y;
 
@@ -25,6 +23,10 @@ typedef struct {
     double note_px, note_y;
     double clock_px, clock_y, clock_w, clock_h;
     double lyric_px, lyric_y, lyric_w;
+    double lyric_bottom;        /* 歌词可视区域下沿（提示行上方，不会压到统计卡片） */
+    double lyric_next_px;       /* 预显示的下一行字号（和当前行同号） */
+    double lyric_area_h;        /* 歌词可视区域高度（lyric_y -> lyric_bottom） */
+    double lyric_gap;           /* 当前行 -> 下一行 的间距 */
     double hint_px, hint_y;     /* SHUFFLE / REPEAT / LRC 偏移 */
 
     /* 右列：封面 + 进度条 / 曲名 / 二维码 + 胶囊 */

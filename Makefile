@@ -34,6 +34,21 @@ $(BUILD)/%.o: src/%.c
 # miniaudio 里的原子操作在 -O2 + 内联时会被误报成 stringop-overflow
 $(BUILD)/core/media.o: CFLAGS += -Wno-stringop-overflow
 
+# ---------------- agent 调试用 MCP ----------------
+# crates/gtk-mcp-agent-capi：stdio MCP 服务，通过应用里的 uidbg 通道读「画面上有什么
+# 文字 / 在哪」、注入按键点击，不用靠截图（截图一张就是几万 token）。
+# 应用侧：FOLLOW_UIDBG=1 ./main.exe，监听 127.0.0.1:7878。
+MCP_DIR := crates/gtk-mcp-agent-capi
+MCP_SRC := $(MCP_DIR)/target/release/gtk-mcp-agent.exe
+MCP_BIN := $(BUILD)/gtk-mcp-agent.exe
+
+.PHONY: mcp
+mcp:
+	cargo build --release --manifest-path $(MCP_DIR)/Cargo.toml
+	@mkdir -p $(BUILD)
+	cp $(MCP_SRC) $(MCP_BIN)
+	@echo "mcp: $(MCP_BIN)"
+
 .PHONY: clean
 clean:
 	rm -rf $(BUILD) main.exe

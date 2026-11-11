@@ -3,3 +3,4 @@ src/assets/
 build/
 *.exe
 main.exe.old
+crates/*/target/

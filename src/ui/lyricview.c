@@ -20,6 +20,9 @@
 #include "lyricsrc.h"
 #include "ui.h"
 
+/* 换行过渡时长（秒）：上一行上浮淡出，新行从下面浮上来 */
+#define LYRIC_FADE_SEC 0.42
+
 /* 在音频所在目录里找一个 .lrc */
 static gchar *find_lrc_in_dir(const char *dir, const char *stem)
 {
@@ -186,8 +189,13 @@ void lyricview_load(const AudioTrack *track)
     g_autofree gchar *stem  = NULL;
 
     g_clear_pointer(&app.lyric_line, g_free);
+    g_clear_pointer(&app.lyric_next, g_free);
+    g_clear_pointer(&app.lyric_prev, g_free);
     g_clear_pointer(&app.lyric_error, g_free);
     g_clear_pointer(&app.lyrics, lyrics_free);
+
+    fx_stop(&app.fx_lyric);
+    app.lyric_index = -1;
 
     app.lyrics_pending     = FALSE;
     app.lyrics_fit_checked = FALSE;
@@ -296,9 +304,21 @@ void lyricview_load(const AudioTrack *track)
     }
 }
 
+/* 两个歌词字符串是不是同一句（NULL = 没歌词） */
+static gboolean text_changed(const gchar *a, const gchar *b)
+{
+    if (a == NULL || b == NULL)
+        return (a == NULL) != (b == NULL);
+
+    return strcmp(a, b) != 0;
+}
+
 void lyricview_sync(double position_sec)
 {
-    const gchar *line;
+    const gchar *cur;
+    const gchar *next;
+    double       at;
+    gboolean     changed = FALSE;
 
     if (!app.lyrics_fit_checked && app.lyrics != NULL &&
         media_duration(&app.media) > 0.0) {
@@ -308,15 +328,49 @@ void lyricview_sync(double position_sec)
 
     /* 歌词时间轴是按原始音频做的；视频源可能带片头/剪辑，
      * 所以用 offset 把播放位置平移一下 */
-    line = lyrics_line_at(app.lyrics,
-                          position_sec - (double)app.lrc_offset_ms / 1000.0);
+    at = position_sec - (double)app.lrc_offset_ms / 1000.0;
 
-    if ((line == NULL) != (app.lyric_line == NULL) ||
-        (line != NULL && app.lyric_line != NULL && strcmp(line, app.lyric_line) != 0)) {
-        g_free(app.lyric_line);
-        app.lyric_line = line != NULL ? g_strdup(line) : NULL;
-        ui_request_redraw();
+    {
+        /* 焦点行：跳过只有时间戳的空行（前奏 / 间奏占位），
+         * 句与句之间、长间奏里上一句都留在场上，不会整块空掉 */
+        gssize index = lyrics_focus_at(app.lyrics, at);
+
+        cur  = lyrics_text_at(app.lyrics, index);
+        next = lyrics_text_at(app.lyrics, lyrics_next_index(app.lyrics, index));
+
+        if (index != app.lyric_index) {
+            app.lyric_index = index;
+            changed         = TRUE;
+        }
     }
+
+    if (text_changed(cur, app.lyric_line)) {
+        /* 旧的当前行交给 prev：过渡时上浮淡出，新行淡入 */
+        g_free(app.lyric_prev);
+        app.lyric_prev = app.lyric_line;
+        app.lyric_line = cur != NULL ? g_strdup(cur) : NULL;
+
+        if (app.lyric_line == NULL) {
+            fx_stop(&app.fx_lyric);
+        } else if (app.lyric_prev != NULL && strcmp(app.lyric_line, app.lyric_prev) == 0) {
+            /* 同一句重复（副歌）：画面本来就不用动 */
+            fx_stop(&app.fx_lyric);
+        } else {
+            fx_begin(&app.fx_lyric, LYRIC_FADE_SEC);
+            ui_animate();
+        }
+
+        changed = TRUE;
+    }
+
+    if (text_changed(next, app.lyric_next)) {
+        g_free(app.lyric_next);
+        app.lyric_next = next != NULL ? g_strdup(next) : NULL;
+        changed = TRUE;
+    }
+
+    if (changed)
+        ui_request_redraw();
 }
 
 void lyricview_shift_offset(int delta_ms)
@@ -337,6 +391,10 @@ void lyricview_clear(void)
 {
     g_clear_pointer(&app.lyrics, lyrics_free);
     g_clear_pointer(&app.lyric_line, g_free);
+    g_clear_pointer(&app.lyric_next, g_free);
+    g_clear_pointer(&app.lyric_prev, g_free);
     g_clear_pointer(&app.lyric_error, g_free);
     g_clear_pointer(&app.lyrics_spec, g_free);
+
+    fx_stop(&app.fx_lyric);
 }

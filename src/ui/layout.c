@@ -27,6 +27,8 @@
 
 #define GAP_NOTE_CLOCK  0.008
 #define GAP_CLOCK_LYRIC 0.024
+#define GAP_LYRIC_NEXT  0.014   /* 当前行 -> 下一行 / h */
+#define GAP_LYRIC_HINT  0.012   /* 歌词区下沿 -> 提示行 / h */
 #define GAP_COVER_BAR   0.005   /* 进度条离封面底部 5px（1080p） */
 #define GAP_CARD_TITLE  0.045
 #define GAP_TITLE_QR    0.022
@@ -98,6 +100,9 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     L->note_px        = clampd(h * NOTE_PX, 11.0, 34.0);
     L->clock_px       = clampd(h * CLOCK_PX, 24.0, 300.0);
     L->lyric_px       = clampd(h * LYRIC_PX, 11.0, 44.0);
+    /* 预显示的下一行和当前行同字号（Apple Music 那种：只靠明暗 / 模糊区分远近） */
+    L->lyric_next_px  = L->lyric_px;
+    L->lyric_gap      = MAX(4.0, h * GAP_LYRIC_NEXT);
     L->hint_px        = clampd(h * HINT_PX, 8.0, 20.0);
     L->title_px       = clampd(h * TITLE_PX, 10.0, 44.0);
     L->stats_clock_px = clampd(h * 0.046, 12.0, 48.0);
@@ -262,6 +267,13 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                - L->clock_px * 0.10;
 
     L->lyric_y = L->clock_y + L->clock_h + h * GAP_CLOCK_LYRIC;
+
+    /* 歌词可视区域：时钟下方 -> 提示行上方。
+     * 顺序很重要：先算出 lyric_y 再用它算高度，否则底边会一路顶到统计卡片里
+     * （提示行、方向、时长这些小组件都会被歌词压住）。 */
+    L->lyric_bottom = MAX(L->lyric_y + L->lyric_px * 1.45,
+                          L->hint_y - h * GAP_LYRIC_HINT);
+    L->lyric_area_h = L->lyric_bottom - L->lyric_y;
 
     /* 歌词卡片的宽度上限 = 时钟宽度（居中在时钟下面） */
     L->lyric_w = MIN(L->left_w, L->clock_w);

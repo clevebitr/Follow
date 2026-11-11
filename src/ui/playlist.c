@@ -22,6 +22,7 @@
 #include "platform.h"
 #include "player.h"
 #include "theme.h"
+#include "uidbg.h"
 #include "ui.h"
 #include "wallgl.h"
 
@@ -1024,8 +1025,12 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     cairo_scale(cr, scale, scale);
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
+    /* 磁贴是离屏渲染的，坐标是磁贴局部坐标：告诉 uidbg 别记，
+     * 否则屏幕上会多出一堆对不上位置的“字”。 */
+    uidbg_suppress(TRUE);
     draw_tile_content(cr, track, 0.0, 0.0, (double)w, (double)h, TRUE);
     draw_normal_border(cr, 0.0, 0.0, (double)w, (double)h);
+    uidbg_suppress(FALSE);
     cairo_destroy(cr);
 
     g_tile_cache[slot].surface = surface;
@@ -1328,8 +1333,10 @@ cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
     cr = cairo_create(surface);
     cairo_scale(cr, scale, scale);
     cairo_translate(cr, 4.0, 4.0);
+    uidbg_suppress(TRUE);
     draw_tile_decoration(cr, track, 0.0, 0.0, (double)w, (double)h,
                          selected, hovered, current);
+    uidbg_suppress(FALSE);
     cairo_destroy(cr);
 
     g_overlay_cache[slot].surface = surface;
@@ -2187,6 +2194,8 @@ void playlist_build_frame(double w, double h)
     if (!P.open)
         return;
 
+    uidbg_begin_layer(UIDBG_LAYER_WALL);
+
     vis = playlist_frame_update(w, h);
 
     if (!P.open)
@@ -2350,6 +2359,9 @@ void playlist_draw(cairo_t *cr, double w, double h)
 
     if (!P.open)
         return;
+
+    uidbg_begin_layer(UIDBG_LAYER_WALL);
+    uidbg_layer_clear(UIDBG_LAYER_WALL);
 
     P.gl_chrome = FALSE;
     vis = playlist_frame_update(w, h);

@@ -14,5 +14,5 @@ auto-breakpoint: false
 
 ## Current
 
-goal: 黑边已修：无 CSD 阴影，1px 细边 + 自定义拖动/缩放
-breakpoint: 已构建 main.exe；命令面板/音量/输出设备/边框均已验证
+goal: 四列歌词：预推出/当前/预演一/预演二 + 种子色高亮
+breakpoint: 四列+种子色+交错间隙已实测；等用户确认观感

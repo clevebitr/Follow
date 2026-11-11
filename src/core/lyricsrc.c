@@ -132,6 +132,29 @@ static gchar *html_unescape(const gchar *text)
     return g_string_free(out, FALSE);
 }
 
+/* 网易云的逐字歌词（yrc）：[行起始,行时长](词起始,词时长,0)字... */
+static gboolean looks_like_yrc(const gchar *text)
+{
+    const gchar *p = text;
+
+    while (p != NULL && *p != (gchar)0) {
+        if (*p == '[' && g_ascii_isdigit(p[1])) {
+            const gchar *br    = strchr(p, ']');
+            const gchar *comma = strchr(p, ',');
+
+            if (br != NULL && comma != NULL && comma < br &&
+                br[1] == '(' && g_ascii_isdigit(br[2]))
+                return TRUE;
+        }
+
+        p = strchr(p, (gchar)10);
+        if (p != NULL)
+            p++;
+    }
+
+    return FALSE;
+}
+
 /* 判断一份 LRC 存不存在时间轴 */
 static gboolean lrc_has_timing(const gchar *lrc)
 {
@@ -230,7 +253,7 @@ static gchar *netease_lyric(const gchar *id, gchar **error)
     gchar            *out = NULL;
 
     url  = g_strdup_printf("https://music.163.com/api/song/lyric"
-                           "?os=pc&id=%s&lv=-1&kv=-1&tv=-1", id);
+                           "?os=pc&id=%s&lv=-1&kv=-1&tv=-1&yv=-1", id);
     body = http_get_utf8(url, NETEASE_REFERER, error);
     if (body == NULL)
         return NULL;
@@ -241,11 +264,23 @@ static gchar *netease_lyric(const gchar *id, gchar **error)
         return NULL;
     }
 
+    /* 优先用逐字歌词（yrc）：有它才能做逐字高亮，没有就退回整行 LRC */
+    {
+        JsonObject *yrc = json_object_has_member(root, "yrc")
+                          ? json_object_get_object_member(root, "yrc") : NULL;
+        const char *ytext = obj_str(yrc, "lyric");
+
+        if (ytext != NULL && looks_like_yrc(ytext))
+            out = g_strdup(ytext);
+    }
+
     lrc  = json_object_has_member(root, "lrc")
            ? json_object_get_object_member(root, "lrc") : NULL;
     text = obj_str(lrc, "lyric");
 
-    if (text == NULL || !lrc_has_timing(text)) {
+    if (out != NULL) {
+        /* 拿到逐字歌词了 */
+    } else if (text == NULL || !lrc_has_timing(text)) {
         if (error != NULL) *error = g_strdup("网易云：这首歌没有带时间轴的歌词");
     } else {
         out = g_strdup(text);

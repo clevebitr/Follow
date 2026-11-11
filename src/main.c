@@ -47,6 +47,7 @@
 #include "cover.h"
 #include "http.h"
 #include "keymap.h"
+#include "lyricgl.h"
 #include "lyricview.h"
 #include "media.h"
 #include "cmdbox.h"
@@ -58,6 +59,7 @@
 #include "stage.h"
 #include "stats.h"
 #include "ui.h"
+#include "uidbg.h"
 #include "viz.h"
 #include "wallgl.h"
 
@@ -83,8 +85,6 @@ static gboolean on_anim_tick(gpointer data);
 
 /* clock 100ms */
 #if defined(_WIN32)
-/* Windows 11 默认给每个窗口画 1px 边框和圆角。应用自己已经是
- * 无边框 CSD，这层 DWM 边会让外圈比之前粗，去掉它并保持直角。 */
 static void apply_window_edge(GtkWidget *window)
 {
     GdkSurface *surface;
@@ -170,7 +170,10 @@ static gboolean on_anim_tick(gpointer data)
     gboolean wall_gpu    = wall_open && wallgl_ready();
     gboolean wall_cpu    = wall_open && !wall_gpu;
     gboolean pending     = playlist_frame_pending();
-    gboolean busy        = stage_anim || chrome_anim;
+    /* 歌词换行过渡：画布不可见时不算活跃（否则会空转） */
+    gboolean lyric_anim  = fx_running(&app.fx_lyric) && app.canvas != NULL &&
+                           gtk_widget_get_visible(app.canvas);
+    gboolean busy        = stage_anim || chrome_anim || lyric_anim;
 
     (void)data;
 
@@ -181,7 +184,7 @@ static gboolean on_anim_tick(gpointer data)
         gtk_widget_queue_draw(app.wallgl);
 
     if (app.canvas != NULL && gtk_widget_get_visible(app.canvas) &&
-        (stage_anim || wall_cpu))
+        (stage_anim || lyric_anim || wall_cpu))
         gtk_widget_queue_draw(app.canvas);
 
     if (app.chrome != NULL && gtk_widget_get_visible(app.chrome) && chrome_anim)
@@ -241,6 +244,11 @@ void ui_sync_layers(void)
     /* 墙全屏时主画布完全被盖住；退出动画期间要留着它垫在主界面下面。 */
     if (app.canvas != NULL)
         gtk_widget_set_visible(app.canvas, !gpu_wall);
+
+    /* 歌词 GPU 层跟着主画布：墙打开 / 关闭、帮助页都要同步 */
+    if (app.lyricgl != NULL)
+        gtk_widget_set_visible(app.lyricgl,
+                               !wall_open && !app.help && !gpu_wall);
 
     /* GL 墙的表头 / 底栏在 chrome 层；cairo 回退时 chrome 由画布一起画。 */
     if (app.chrome != NULL)
@@ -438,12 +446,14 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
             app.help = FALSE;
             app.chrome_dirty = TRUE;
             ui_request_redraw();
+            ui_sync_layers();
         } else if (keymap_match(KEY_QUIT, keyval, state)) {
             gtk_window_close(GTK_WINDOW(app.window));
         } else if (keymap_match(KEY_PLAYLIST, keyval, state)) {
             app.help = FALSE;
             app.chrome_dirty = TRUE;
             playlist_open_page();
+            ui_sync_layers();
         }
 
         return TRUE;
@@ -462,6 +472,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
             app.help = TRUE;
             app.chrome_dirty = TRUE;
             ui_request_redraw();
+            ui_sync_layers();
             return TRUE;
         }
 
@@ -571,6 +582,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         app.help = TRUE;
         app.chrome_dirty = TRUE;
         ui_request_redraw();
+        ui_sync_layers();
         return TRUE;
     }
     if (keymap_match(KEY_QUIT, keyval, state)) {
@@ -586,8 +598,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     return FALSE;
 }
 
-/* 鼠标：歌曲墙的拖动 / 滚轮 / 悬停 / 点击 */
-static void on_canvas_released(GtkGestureClick *gesture, int n_press,
+/* 鼠标：歌曲墙的拖动 / 滚轮 / 悬停 / 点击 */static void on_canvas_released(GtkGestureClick *gesture, int n_press,
                                double x, double y, gpointer data)
 {
     (void)gesture;
@@ -658,6 +669,100 @@ static gboolean on_canvas_scroll(GtkEventControllerScroll *controller,
 
     playlist_pan_by(dx, dy);
     return TRUE;
+}
+
+/* ---------- agent 调试通道的输入注入（uidbg） ---------- */
+
+/* 命令面板是真实 GTK 控件：它开着的时候 Enter/↑/↓/Esc 走面板自己的
+ * 选中逻辑（palette_debug_steps），其他键交给全局快捷键。 */
+gboolean uidbg_hook_key(guint keyval, GdkModifierType state)
+{
+    if (palette_is_open()) {
+        switch (keyval) {
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter:
+            palette_debug_steps("enter");
+            return TRUE;
+        case GDK_KEY_Down:
+            palette_debug_steps("down");
+            return TRUE;
+        case GDK_KEY_Up:
+            palette_debug_steps("up");
+            return TRUE;
+        case GDK_KEY_Escape:
+            palette_debug_steps("esc");
+            return TRUE;
+        default:
+            break;
+        }
+    }
+
+    return on_key_pressed(NULL, keyval, 0, state, NULL);
+}
+
+void uidbg_hook_click(double x, double y, gboolean double_click)
+{
+    (void)double_click;
+
+    if (palette_is_open() && !palette_contains(x, y)) {
+        palette_close();
+        return;
+    }
+
+    if (playlist_is_open())
+        playlist_click(x, y);
+}
+
+void uidbg_hook_scroll(double x, double y, double dx, double dy)
+{
+    (void)x;
+    (void)y;
+
+    if (playlist_is_open())
+        playlist_pan_by(dx, dy);
+}
+
+void uidbg_hook_motion(double x, double y)
+{
+    if (playlist_is_open())
+        playlist_hover(x, y);
+}
+
+void uidbg_hook_seek(double seconds)
+{
+    player_seek_to(seconds);
+}
+
+static GtkWidget *find_text_entry(GtkWidget *widget)
+{
+    if (GTK_IS_ENTRY(widget) && gtk_widget_get_visible(widget))
+        return widget;
+
+    for (GtkWidget *child = gtk_widget_get_first_child(widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling(child)) {
+        GtkWidget *found = find_text_entry(child);
+
+        if (found != NULL)
+            return found;
+    }
+
+    return NULL;
+}
+
+void uidbg_hook_text(const gchar *text)
+{
+    GtkWidget *entry;
+
+    if (!palette_is_open())
+        return;
+
+    entry = find_text_entry(app.window);
+    if (entry == NULL)
+        return;
+
+    /* 设文字会触发 "changed"，面板自己重新过滤 / 选中第一项 */
+    gtk_editable_set_text(GTK_EDITABLE(entry), text != NULL ? text : "");
 }
 
 
@@ -745,6 +850,17 @@ static gboolean debug_close_wall(gpointer data)
 
     if (g_getenv("FOLLOW_WALL_AUTO_REOPEN") != NULL)
         g_timeout_add(1200, debug_open_wall, NULL);
+
+    return G_SOURCE_REMOVE;
+}
+
+/* 开发 / 性能测试用：自动开播（FOLLOW_AUTOPLAY） */
+static gboolean debug_autoplay(gpointer data)
+{
+    (void)data;
+
+    g_message("debug: autoplay (FOLLOW_AUTOPLAY)");
+    player_toggle();
 
     return G_SOURCE_REMOVE;
 }
@@ -1066,6 +1182,10 @@ static void activate(GtkApplication *app_, gpointer user_data)
      * 事件仍然落在 canvas 上。 */
     app.wallgl = wallgl_new();
 
+    /* 歌词：GL 层只画歌词（字形纹理 + shader 辉光 / 模糊），
+     * 背景透明，盖在主画布上。没有 GL 时 canvas 自己画。 */
+    app.lyricgl = lyricgl_new();
+
     app.chrome = gtk_drawing_area_new();
     gtk_widget_set_hexpand(app.chrome, TRUE);
     gtk_widget_set_vexpand(app.chrome, TRUE);
@@ -1084,6 +1204,10 @@ static void activate(GtkApplication *app_, gpointer user_data)
         gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.bg_gl);
 
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.canvas);
+
+    if (app.lyricgl != NULL)
+        gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.lyricgl);
+
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.wallgl);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.chrome);
 
@@ -1179,6 +1303,10 @@ static void activate(GtkApplication *app_, gpointer user_data)
 
     gtk_window_present(GTK_WINDOW(window));
 
+    /* agent 调试通道：只有 FOLLOW_UIDBG 打开时才监听端口 */
+    if (g_getenv("FOLLOW_UIDBG") != NULL)
+        uidbg_start(window);
+
 #if defined(_WIN32)
     g_idle_add(apply_window_edge_idle, window);
 #endif
@@ -1191,6 +1319,9 @@ static void activate(GtkApplication *app_, gpointer user_data)
     /* 开发 / 性能测试用：自动开墙、定时退出。 */
     if (g_getenv("FOLLOW_WALL_AUTO") != NULL)
         g_timeout_add(1200, debug_open_wall, NULL);
+
+    if (g_getenv("FOLLOW_AUTOPLAY") != NULL)
+        g_timeout_add(2500, debug_autoplay, NULL);
 
     if (g_getenv("FOLLOW_PALETTE_AUTO") != NULL)
         g_timeout_add(1600, debug_open_palette, NULL);
@@ -1306,8 +1437,7 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     (void)user_data;
 
     if (app.tick_id != 0)
-        g_source_remove(app.tick_id);
-    if (app.bg_tick_id != 0)
+        g_source_remove(app.tick_id);    if (app.bg_tick_id != 0)
         g_source_remove(app.bg_tick_id);
     if (app.anim_id != 0) {
         g_source_remove(app.anim_id);
@@ -1315,6 +1445,8 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     }
 
     g_clear_pointer(&app.snapshot, cairo_surface_destroy);
+
+    uidbg_stop();
 
     stats_save(&app.stats);
     stats_clear(&app.stats);
@@ -1364,7 +1496,15 @@ int main(int argc, char **argv)
     }
 #endif
 
-    app_ = gtk_application_new(FOLLOW_APP_ID, FOLLOW_APP_FLAGS);
+    /* 调试用：FOLLOW_APP_ID_OVERRIDE 換个 app id，就能和已经在跑的那份并存。
+     * GtkApplication 是单实例的，不带它时第二份会直接把活交给第一份就退出。 */
+    {
+        const gchar *own_id = g_getenv("FOLLOW_APP_ID_OVERRIDE");
+
+        app_ = gtk_application_new(own_id != NULL && *own_id != '\0' ? own_id : FOLLOW_APP_ID,
+                                   FOLLOW_APP_FLAGS);
+    }
+
     if (app_ == NULL)
         return 1;
 

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "follow-ui": {
+      "command": "F:/Users/xiaol/Follow/build/gtk-mcp-agent.exe",
+      "args": [],
+      "env": {
+        "FOLLOW_UIDBG_PORT": "7878",
+        "FOLLOW_ROOT": "F:/Users/xiaol/Follow",
+        "FOLLOW_APP": "F:/Users/xiaol/Follow/main.exe"
+      },
+      "description": "Follow 的 GTK 界面调试：读屏上文字/控件、注入按键点击、日志与帧时间（应用需以 FOLLOW_UIDBG=1 启动）"
+    }
+  }
+}

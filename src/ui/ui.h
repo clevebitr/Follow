@@ -39,6 +39,7 @@ typedef struct {
     GtkWidget *header_bar;   /* 无 CSD 外框时放在内容顶部 */
     GtkWidget *header_title;
     GtkWidget *canvas;
+    GtkWidget *lyricgl;     /* 歌词 GPU 层（透明，盖在主画布上） */
     GtkWidget *wallgl;      /* 歌曲墙 GPU 层 */
     GtkWidget *chrome;      /* 歌曲墙表头 / 底栏 / 帮助页（透明层） */
     GtkWidget *bg_picture;
@@ -75,6 +76,10 @@ typedef struct {
     /* 歌词 */
     Lyrics  *lyrics;
     gchar   *lyric_line;          /* 当前要显示的一行 */
+    gchar   *lyric_next;          /* 下一行（预显示：淡色、不发光） */
+    gssize   lyric_index;         /* 当前行号（-1 = 还没到第一行） */
+    gchar   *lyric_prev;          /* 刚翻过去的一行：过渡时上浮淡出 */
+    Fx       fx_lyric;            /* 换行过渡（淡入淡出 + 上浮） */
     gchar   *lyric_error;         /* 找不到 / 解析失败的原因 */
     gchar   *lyrics_spec;         /* 当前歌词源 */
     guint    lyrics_gen;

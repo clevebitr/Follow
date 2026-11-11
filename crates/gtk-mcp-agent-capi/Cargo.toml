@@ -1,0 +1,17 @@
+[package]
+name = "gtk-mcp-agent-capi"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server for debugging the Follow GTK UI through its C debug channel (uidbg)"
+license = "MIT"
+
+[[bin]]
+name = "gtk-mcp-agent"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
+strip = true

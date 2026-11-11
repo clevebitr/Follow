@@ -60,6 +60,40 @@ void text_draw(cairo_t *cr, const char *text, const TextStyle *style,
 
 double text_block_height(cairo_t *cr, const char *text, const TextStyle *style,
                          double max_width, int max_lines);
+
+/* 把一段文字画成一张 A8 字形遮罩（给 GPU 当纹理用）：
+ * 四周各留 pad 像素（发光要的余地），文字块左上角在 (pad, pad)。
+ * 排版规则和 text_draw_block 完全一致（同样的宽度 / 对齐 / 行数）。
+ * out_w / out_h 返回不含 pad 的文字块尺寸（像素）。失败返回 NULL。 */
+cairo_surface_t *text_mask_surface(const char *text, const TextStyle *style,
+                                   double max_width, int align, int max_lines,
+                                   int pad, int *out_w, int *out_h);
+
+/* 自动折行：把一段文字按 max_width 折成若干视觉行（不省略、不限行数）。
+ * 每个视觉行给出它在原文里的字节区间和相对文字块顶部的纵向位置，
+ * 调用方可以逐行画，长歌词就不会被截断。 */
+typedef struct {
+    guint  start;   /* 该行在原文里的起始字节 */
+    guint  len;     /* 该行的字节数 */
+    double y;       /* 行顶相对文字块顶部（逻辑像素） */
+    double h;       /* 行高（逻辑像素） */
+} TextRow;
+
+/* 返回行数组（g_free 释放）；*out_n 行数、*out_h 文字块总高度。失败返回 NULL。 */
+TextRow *text_wrap(cairo_t *cr, const char *text, const TextStyle *style,
+                   double max_width, int *out_n, double *out_h);
+
+/* 一次排版出两张逐像素对齐的 A8 遮罩（给歌词 GPU 层用，只处理单行文字）：
+ *   out_glyph  字形本身
+ *   out_order  每个字的时间坐标（0..255）
+ * order[i] 是第 i 个字的时间坐标：没有逐字时间轴时传 NULL（全 0 = 整行一起亮），
+ * 有逐字时间轴时由调用方按 (字时间 - 行起始) / 行时长 归一化好。
+ * 尺寸（含 pad）写回 out_w / out_h。 */
+gboolean text_mask_pair(const char *text, const TextStyle *style, int pad,
+                        const guint8 *order, int n_order,
+                        cairo_surface_t **out_glyph, cairo_surface_t **out_order,
+                        int *out_w, int *out_h);
+
 double text_draw_block(cairo_t *cr, const char *text, const TextStyle *style,
                        double x, double y, int align, double max_width, int max_lines);
 
