@@ -221,6 +221,21 @@ void ui_animate(void)
         app.anim_id = g_timeout_add(16, on_anim_tick, NULL);
 }
 
+/* 动态背景泵：间隔由 [ui] backdrop_fps 决定（默认 30fps）。
+ * 相位推进在 backdrop_tick 里按实际间隔走，所以改帧率不会改变动画速度。 */
+static void backdrop_timer_start(void)
+{
+    gint fps = config_backdrop_fps();
+    guint ms = (guint)MAX(4, 1000 / MAX(fps, 1));
+
+    if (app.bg_tick_id != 0) {
+        g_source_remove(app.bg_tick_id);
+        app.bg_tick_id = 0;
+    }
+
+    app.bg_tick_id = g_timeout_add(ms, backdrop_tick, NULL);
+}
+
 void ui_sync_layers(void)
 {
     static gint64   warm_start;
@@ -405,6 +420,9 @@ void ui_reload_config(void)
     }
 
     player_update_window_title();
+
+    /* [ui] backdrop_fps 可能改了：按新间隔重挂定时器 */
+    backdrop_timer_start();
 
     app.chrome_dirty = TRUE;
     ui_request_redraw();
@@ -1226,7 +1244,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     app.tick_id = g_timeout_add(TICK_MS, on_tick, NULL);
 
     backdrop_push(cfg->width, cfg->height);
-    app.bg_tick_id = g_timeout_add(33, backdrop_tick, NULL);
+    backdrop_timer_start();
 
     /* 开发 / 性能测试用：自动开墙、定时退出。 */
     if (g_getenv("FOLLOW_WALL_AUTO") != NULL)

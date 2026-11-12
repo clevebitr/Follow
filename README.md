@@ -92,6 +92,11 @@
   每秒调用次数 / 纹理上传量。帧时间取自窗口的 `GdkFrameClock::after-paint`，
   是「真的合成了一帧」的时刻，而不是主画布的重画间隔。
 - `FOLLOW_PERF=1` 启动时就打开检测层（做回归测试 / 截帧时方便）。
+- **面板读数怎么读**：它数的是「真的合成了一帧」的次数（`GdkFrameClock::after-paint`），
+  应用按需重绘，没有固定帧率。静止时只有动态背景在动，而背景默认就是 30fps
+  （`[ui] backdrop_fps`），所以面板会稳定在 26–30；只有拿到逐字时间轴的歌词才会逐帧扫描，
+  这时面板会升到 ~40（当前主画布每帧还有一笔 cairo 合成的开销，见 TODO）。
+  歌曲墙打开时只有一层不透明 GLArea，面板能到 ~137fps（`GdkFrameClock` 的实际上限）。
 
 > 开发调试：`FOLLOW_WALL_AUTO=1` 启动后自动开墙，`FOLLOW_EXIT_MS=8000` 定时退出，
 > `FOLLOW_WALL_AUTO_PAN=1` 持续平移，`FOLLOW_WALL_AUTO_CLOSE` / `FOLLOW_WALL_AUTO_REOPEN`
@@ -190,6 +195,7 @@ link=https://live.bilibili.com/1840990819
 
 [ui]
 animations=true                   # 动效总开关：进场 / 退场 / 磁贴弹出 / 封面淡入
+backdrop_fps=30                   # 动态背景刷新率（10..240）；30 = 默认，60 更顺但更费 GPU
 
 [net]
 #user_agent=Mozilla/5.0 ...       # 留空就用内置的浏览器 UA

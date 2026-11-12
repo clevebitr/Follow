@@ -261,6 +261,7 @@ static void config_reset(void)
     g_config.audio_max_mb   = 512;
     g_config.cover_max_mb   = 128;
     g_config.animations     = TRUE;
+    g_config.backdrop_fps   = 30;
     g_config.viz_effect  = g_strdup("dust");
     g_config.viz_particles = 150;
     g_config.viz_gain      = 1.0;
@@ -501,8 +502,10 @@ const APPconfig *config_load(const char *path)
         g_config.connect_timeout = config_get_int(kf, "net", "connect_timeout", 0);
     }
 
-    /* [ui] 动效总开关 */
+    /* [ui] 动效总开关 / 动态背景刷新率 */
     g_config.animations = config_get_bool(kf, "ui", "animations", TRUE);
+    g_config.backdrop_fps = config_get_int(kf, "ui", "backdrop_fps",
+                                           g_config.backdrop_fps);
 
     /* [net] proxy：YouTube 这类在国内需要代理，curl 和 FFmpeg 都用它 */
     {
@@ -675,4 +678,14 @@ gboolean config_animations(void)
 void config_set_animations(gboolean on)
 {
     g_config.animations = on ? TRUE : FALSE;
+}
+
+gint config_backdrop_fps(void)
+{
+    gint fps = config_get()->backdrop_fps;
+
+    if (fps < 10)
+        fps = 30;
+
+    return CLAMP(fps, 10, 240);
 }

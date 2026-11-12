@@ -85,8 +85,9 @@ typedef struct {
     gint     viz_particles;   /* 粒子数量，0 = 用默认值 */
     double   viz_gain;        /* 音频灵敏度，1.0 为基准 */
 
-    /* [ui] 动效总开关 */
+    /* [ui] 动效总开关 / 动态背景刷新率 */
     gboolean animations;
+    gint     backdrop_fps;    /* 10..240，默认 30 */
 
     /* [keys] 按键绑定：每个动作的原始字符串，NULL = 用 keymap 内置默认值 */
     gchar   *key_bind[KEY_ACTION_COUNT];
@@ -156,6 +157,9 @@ guint64 config_cover_max_bytes(void);
 /* [ui] 动效总开关 */
 gboolean config_animations(void);
 void     config_set_animations(gboolean on);
+
+/* [ui] 动态背景刷新率（帧/秒）：默认 30；调高会更费 GPU/CPU，视觉差别很小 */
+gint     config_backdrop_fps(void);
 
 /* 把本地路径 / file:// URI 统一成文件系统路径，返回新分配的字符串。 */
 gchar *config_to_local_path(const gchar *uri);

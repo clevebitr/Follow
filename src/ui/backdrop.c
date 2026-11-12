@@ -16,6 +16,7 @@
 
 #include <gtk/gtk.h>
 
+#include "config.h"
 #include "cover.h"
 #include "texture.h"
 #include "theme.h"
@@ -27,7 +28,8 @@
 
 #define BG_WIDTH      512      /* 小纹理的宽度，放大交给 GPU */
 #define BG_BLUR_DIM   160      /* 先把封面缩到这个长边再模糊 */
-#define BG_FRAME_SEC  0.0333   /* 30fps 一帧推进的相位 */
+/* 背景泵的间隔来自 [ui] backdrop_fps（main.c），这里只把实际间隔换算成相位步进。
+ * 默认 30fps；相位按真实 dt 推进，所以 30 / 60fps 动画速度一致。 */
 
 static BackdropFrame g_prepared;
 static gint64        g_base_gen;
@@ -477,7 +479,7 @@ gboolean backdrop_tick(gpointer data)
 
     perf_phase_begin(PERF_PHASE_BACKDROP_CPU);
 
-    backdrop_step(BG_FRAME_SEC);
+    backdrop_step(1.0 / (double)MAX(config_backdrop_fps(), 1));
 
     if (backdropgl_ready()) {
         /* GPU 背景：30fps 只更新相位 / 粒子并让 GLArea 重画，

@@ -328,3 +328,22 @@ NEXT 标识改为卡片内背景水印（用户建议）：
 
 \## 下一步（TODO P1）
 把主画布从 cairo 节点换成纹理节点：`stage_paint()` 先画进 ARGB32 图面，内容变了才包成 `GdkTexture` 并用 `gtk_snapshot_append_texture()` 提交（GskTextureNode 的上传按纹理对象缓存，一次内容只上传一次）。静止时每帧只剩一次纹理采样；动画期间最多和现在打平（栅格 12ms + 上传 ≈ 现在的记录 6ms + 栅格 10ms）。
+
+## 2026-11-12 — [ui] backdrop_fps：动态背景泵帧率可配
+
+\## 起因
+用户看到 F12 面板静止时只有 26-30fps，以为面板是假的。查明那是动态背景 33ms 定时泵的设计基线（每帧合成再叠一点延迟，实际 26-30）。既然有人希望「看起来更顺」，把泵帧率做成配置项，而不是硬编码 30。
+
+\## 做法
+- `[ui] backdrop_fps`（默认 30，范围 10..240；<10 视为 30）。
+- `config_backdrop_fps()` 访问器；`main.c` 新增 `backdrop_timer_start()`，用 `1000/fps` 挂定时器（最小 4ms），启动时和 `Reload config.ini` 时都会重挂。
+- `backdrop_tick` 的相位推进从固定 `BG_FRAME_SEC 0.0333` 改成 `1/实际fps`：改帧率只改变采样密度，不改变动画速度。
+- README：面板读数怎么读 + `[ui] backdrop_fps` 说明；config.ini 注释写清代价。
+
+\## 实测
+- 30fps：静止 p50 ≈ 44.9ms（26fps）。
+- 60fps：静止 53.8fps / p50 18.3ms；
+- 运行中把 ini 改回 30 再 Reload：立刻回落到 26.2fps，说明定时器重挂生效；这次 reload 本身被面板记成 2 次 >50ms 卡顿，符合预期。
+
+\## 取舍
+背景是刻意的低频动画，60fps 只是让光斑/粒子更顺一点，GPU/CPU 约翻倍（GL 背景每次 0.1ms CPU，CPU 回退路径会到 ~13ms/次，别在回退机器上开 60）。真正影响「扫歌词时的帧率」的是主画布每帧的 cairo 合成（TODO P1 / M4），跟这个开关无关。
