@@ -17,10 +17,16 @@
 
 ## P1 — 待跟进（性能）
 
+- [ ] 主画布换纹理节点（详见 DECISIONS #22）：每帧 GSK 都会把 cairo 节点重新栅格化
+  （1080p 约 10ms），即使 draw_func 只 1-2 次/秒。改成 ARGB32 图面 + `GdkTexture`
+  + `gtk_snapshot_append_texture()`，内容变了才重建纹理
+  - 实测对照：隐藏主画布后 25.6fps → 37.6fps（p50 44.6ms → 24.6ms）
 - [ ] 主画布一次重画 ~6ms：`theme_text_draw` 每次都重建 PangoLayout，可做 LRU 排版缓存
-  （只在过渡动画的 0.3~0.8s 里明显：那段主画布每秒重画几十次）
+  （过渡动画 0.3~0.8s 期间主画布重画频繁时才明显）
 - [ ] 墙打开时空转：`wallgl` 的 tick 回调常驻，静止时也会把 frame clock 拉到显示器刷新率
   （实测 1920×1080 / 144Hz 空转 137fps）
+- [ ] CPU 背景回退（`FOLLOW_BACKDROPGL=0`）13.4ms/次 × 23 次/秒 ≈ 32% 单核：
+  `backdrop_push` 每帧新建 GdkTexture + 盒式模糊，可以复用纹理 / 降尺寸
 
 ## P0 — 歌词动效（上一轮）
 

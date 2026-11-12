@@ -23,7 +23,9 @@
 
 #define PERF_RING        240       /* 帧间隔环形缓冲：60fps 约 4 秒 */
 #define PERF_SPARK       120       /* 面板上画的柱子数 */
-#define PERF_IDLE_GAP    100000    /* > 100ms 的间隔算空闲，不进统计 */
+#define PERF_IDLE_GAP    100000    /* > 100ms 的间隔算空闲，不进稳定帧统计 */
+#define PERF_HITCH_US    500000    /* 长帧统计上限：再长就是窗口被挡住 / 没画面 */
+#define PERF_STALL_MS    50.0      /* 超过这个间隔算一次卡顿 */
 #define PERF_WINDOW_US   2000000   /* 帧率统计窗口：最近 2 秒 */
 #define PERF_UPDATE_MS   200       /* 面板刷新间隔 */
 #define PERF_ROTATE_US   950000    /* 每秒折算一次各层调用频率 */
@@ -77,9 +79,11 @@ static struct {
     gboolean idle;
     double   fps;
     double   frame_ms;
+    double   p50_ms;
     double   p95_ms;
     double   worst_ms;
     double   cpu_pct;
+    guint    stalls;      /* 最近 2 秒里 > PERF_STALL_MS 的间隔个数 */
 } P;
 
 static const Rgba perf_ok   = { 0.62, 0.86, 0.72, 0.90 };
@@ -215,9 +219,11 @@ static void reset_stats(void)
     P.idle         = TRUE;
     P.fps          = 0.0;
     P.frame_ms     = 0.0;
+    P.p50_ms       = 0.0;
     P.p95_ms       = 0.0;
     P.worst_ms     = 0.0;
     P.cpu_pct      = 0.0;
+    P.stalls       = 0;
 }
 
 /* 每约 1 秒把「调用次数 / 总耗时」折成频率和平均耗时 */
@@ -278,8 +284,10 @@ static void refresh_frames(gint64 now)
         P.idle     = TRUE;
         P.fps      = 0.0;
         P.frame_ms = 0.0;
+        P.p50_ms   = 0.0;
         P.p95_ms   = 0.0;
         P.worst_ms = 0.0;
+        P.stalls   = 0;
         return;
     }
 
@@ -300,8 +308,28 @@ static void refresh_frames(gint64 now)
     }
 
     P.frame_ms = (double)((double)sum / (double)n) / 1000.0;
+    P.p50_ms   = ms[(guint)((double)(n - 1) * 0.50)];
     P.p95_ms   = ms[(guint)((double)(n - 1) * 0.95)];
-    P.worst_ms = ms[n - 1];
+
+    /* 长帧 / 卡顿单独统计：只能看「稳定性」，不能用刷新率的倍数当阈值
+     * （背景本来就是 30fps 泵，按 1.5× 刷新率算会把每个正常帧都标成掉帧）。 */
+    P.worst_ms = 0.0;
+    P.stalls   = 0;
+
+    for (guint k = 0; k < P.ring_n; k++) {
+        guint       slot = (P.ring_i + PERF_RING - P.ring_n + k) % PERF_RING;
+        const Gap  *g    = &P.ring[slot];
+        double      v;
+
+        if (g->at_us < from || g->gap_us <= 0 || g->gap_us > PERF_HITCH_US)
+            continue;
+
+        v = (double)g->gap_us / 1000.0;
+        P.worst_ms = MAX(P.worst_ms, v);
+
+        if (v > PERF_STALL_MS)
+            P.stalls++;
+    }
 }
 
 /* ---------------- 绘制 ---------------- */
@@ -428,8 +456,8 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     refresh_ms = P.refresh_us > 0
                ? (double)P.refresh_us / 1000.0 : 1000.0 / 60.0;
 
-    h = pad + 12.0 + 30.0 + 13.0 + 7.0 + 40.0 + 7.0
-      + PERF_ROW_H * (double)PERF_ROWS + 7.0 + 13.0 + 13.0 + pad;
+    h = pad + 12.0 + 30.0 + 13.0 + 13.0 + 7.0 + 40.0 + 7.0
+      + PERF_ROW_H * (double)PERF_ROWS + 7.0 + 13.0 + pad;
 
     if (h > (double)height - y * 2.0)
         h = (double)height - y * 2.0;
@@ -489,17 +517,28 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     yy += 30.0;
 
     if (P.idle) {
-        line = g_strdup_printf("最近 2 秒没有持续重绘 · CPU %.1f%%", P.cpu_pct);
+        line = g_strdup_printf("最近 2 秒没有持续重绘（按需渲染）");
     } else {
-        g_autofree gchar *avg  = g_strdup_printf("avg %.1f", P.frame_ms);
-        g_autofree gchar *p95  = g_strdup_printf("p95 %.1f", P.p95_ms);
-        g_autofree gchar *worst = g_strdup_printf("最慢 %.1f", P.worst_ms);
-        g_autofree gchar *cpu  = g_strdup_printf("CPU %.1f%%", P.cpu_pct);
+        g_autofree gchar *avg   = g_strdup_printf("avg %.1f", P.frame_ms);
+        g_autofree gchar *p50   = g_strdup_printf("p50 %.1f", P.p50_ms);
+        g_autofree gchar *p95   = g_strdup_printf("p95 %.1f", P.p95_ms);
+        g_autofree gchar *worst = g_strdup_printf("最慢 %.1f ms", P.worst_ms);
 
-        line = g_strdup_printf("%s · %s · %s ms · %s", avg, p95, worst, cpu);
+        line = g_strdup_printf("%s · %s · %s · %s", avg, p50, p95, worst);
     }
 
     text_draw(cr, line, &meta, in_x, yy, TEXT_LEFT, in_w);
+    yy += 13.0;
+
+    {
+        g_autofree gchar *cpu    = g_strdup_printf("CPU %.1f%%", P.cpu_pct);
+        g_autofree gchar *stalls = g_strdup_printf("卡顿 %u", P.stalls);
+        g_autofree gchar *upload = g_strdup_printf("上传 %.1f MB/s", P.upload_mbps);
+        g_autofree gchar *all    = g_strjoin(" · ", cpu, stalls, upload, NULL);
+
+        text_draw(cr, all, &meta, in_x, yy, TEXT_LEFT, in_w);
+    }
+
     yy += 13.0 + 7.0;
 
     draw_spark(cr, in_x, yy, in_w, 40.0, refresh_ms);
@@ -527,24 +566,15 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
 
     yy += 7.0;
 
-    line = g_strdup_printf("%d×%d · %d× · GL %s/%s/%s",
+    line = g_strdup_printf("%d×%d · %d× · GL %s/%s/%s · 帧 %" G_GINT64_FORMAT,
                            gtk_widget_get_width(app.window),
                            gtk_widget_get_height(app.window),
                            gtk_widget_get_scale_factor(app.window),
                            backdropgl_ready() ? "bg" : "--",
                            lyricgl_ready() ? "lyric" : "-----",
-                           wallgl_ready() ? "wall" : "----");
+                           wallgl_ready() ? "wall" : "----",
+                           P.frames_total);
     text_draw(cr, line, &small, in_x, yy, TEXT_LEFT, in_w);
-    yy += 13.0;
-
-    {
-        g_autofree gchar *frames = g_strdup_printf("帧 %" G_GINT64_FORMAT,
-                                                   P.frames_total);
-        g_autofree gchar *upload = g_strdup_printf("上传 %.1f MB/s", P.upload_mbps);
-        g_autofree gchar *both   = g_strjoin(" · ", frames, upload, NULL);
-
-        text_draw(cr, both, &small, in_x, yy, TEXT_LEFT, in_w);
-    }
 
     uidbg_begin_layer(UIDBG_LAYER_STAGE);
 }
