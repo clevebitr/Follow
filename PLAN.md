@@ -16,5 +16,5 @@ auto-breakpoint: false
 
 ## Current: M4 — 主画布换纹理节点，消掉每帧 cairo 重生（详见 #22）
 
-goal: 性能检测层（F12）+ fx_lyric 重绘修复
-breakpoint: 已提交 704ddce（未推送）；后续优化见 TODO P1
+goal: F12 面板口径 + 背景帧率可配（#22/#23）
+breakpoint: 已提交 b8b4495/aa119f3（未推送）；主画布纹理化留 M4/TODO
