@@ -430,6 +430,22 @@ static void next_card_paint(cairo_t *cr, const Layout *L, gint idx,
 
     card_draw(cr, L->next_x, L->next_y, L->next_w, L->next_h, L->card_radius * 0.8);
 
+    /* "NEXT" 作为卡片背景水印：右对齐、低对比，压在内容下面 */
+    {
+        TextStyle tag = TEXT_STYLE(FONT_MONO, L->next_px * 1.25, PANGO_WEIGHT_BOLD,
+                                  L->next_px * 0.30, WHITE(0.11));
+        double    tag_w = text_width(cr, "NEXT", &tag);
+        double    tag_y = L->next_y + (L->next_h - L->next_px * 1.25 * 1.45) * 0.5;
+
+        cairo_save(cr);
+        path_round_rect(cr, L->next_x, L->next_y, L->next_w, L->next_h,
+                        L->card_radius * 0.8);
+        cairo_clip(cr);
+        text_draw(cr, "NEXT", &tag, L->next_x + L->next_w - pad - tag_w, tag_y,
+                  TEXT_LEFT, 0.0);
+        cairo_restore(cr);
+    }
+
     img = next_thumb(idx, &img_a);
 
     if (img != NULL) {
@@ -521,13 +537,6 @@ static void draw_next_card(cairo_t *cr, const Layout *L)
 
     if (k >= 1.0)
         g_next_t0 = 0;
-
-    {
-        TextStyle tag = TEXT_STYLE(FONT_MONO, L->next_px * 0.72, PANGO_WEIGHT_NORMAL,
-                                  L->next_px * 0.24, col_dim);
-
-        text_draw(cr, "NEXT", &tag, L->next_x, L->next_label_y, TEXT_LEFT, L->next_w);
-    }
 
     next_deck_paint(cr, L, k < 1.0 ? k : 1.0);
 

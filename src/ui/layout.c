@@ -297,14 +297,12 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
      * 中间的曲名 / 二维码 / 胶囊把剩余空间均分到三处间距，
      * 保证 NEXT 小标题不会挤到胶囊上。 */
     {
-        const double label_h = L->next_px * LINE_HEIGHT;
         const double stack_h = L->title_px * LINE_HEIGHT * TITLE_LINES
                              + L->qr_px + (n_qr > 0 ? L->badge_h : 0.0);
         const double gap_sum = h * (GAP_CARD_TITLE + GAP_TITLE_QR + GAP_QR_BADGE);
         const double top     = L->cover_card_y + L->cover_card_h;
-        /* NEXT 小标题上下各留一个 NEXT_GAP：上不贴胶囊、下不贴卡片 */
-        const double bottom  = L->stats_bottom - L->next_h
-                             - h * NEXT_GAP * 2.0 - label_h;
+        /* 卡片上方留一个 NEXT_GAP，避免贴住胶囊 */
+        const double bottom  = L->stats_bottom - L->next_h - h * NEXT_GAP;
         double       extra   = ((bottom - top) - (stack_h + gap_sum)) / 3.0;
 
         /* 空间不足时先把三处间距压到 40%，仍不足则缩小 NEXT 卡片 */
@@ -322,7 +320,6 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
         L->badge_y  = L->qr_y + L->qr_px + qr_gap;
 
         L->next_y       = L->stats_bottom - L->next_h;
-        L->next_label_y = L->next_y - label_h - h * NEXT_GAP;
         L->next_w       = L->col_w;
         L->next_x       = L->col_cx - L->next_w * 0.5;
     }

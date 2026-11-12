@@ -42,7 +42,6 @@ typedef struct {
 
     /* NEXT 预告（叠放卡片）：位于曲名与二维码之间 */
     double next_x, next_y, next_w, next_h;
-    double next_label_y;                                   /* "NEXT" 小标题上沿 */
 
     /* 统计块（无衬底）：左侧热力图 + 右侧墙钟 / 收听时长 */
     double stats_x, stats_y, stats_w, stats_h;          /* 整块外框 */
