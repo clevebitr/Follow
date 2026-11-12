@@ -33,7 +33,7 @@
 #define GAP_CARD_TITLE  0.045
 #define NEXT_H          0.072   /* NEXT 卡片高度 / h */
 #define NEXT_GAP        0.020   /* NEXT 小标题 -> 卡片 / h */
-#define SHIFT_X         0.021   /* 两列整体右移 / w */
+#define SHIFT_X         0.050   /* 两列整体右移 / w */
 #define STATS_LIFT      0.035   /* 统计块相对底边内边距再上抬 / h */
 #define GAP_TITLE_QR    0.022
 #define GAP_QR_BADGE    0.045
