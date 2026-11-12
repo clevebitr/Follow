@@ -32,7 +32,8 @@
 #define GAP_COVER_BAR   0.005   /* 进度条离封面底部 5px（1080p） */
 #define GAP_CARD_TITLE  0.045
 #define NEXT_H          0.072   /* NEXT 卡片高度 / h */
-#define NEXT_GAP        0.020   /* NEXT 小标题 -> 卡片 / h */
+#define NEXT_GAP        0.020   /* NEXT 卡片与其上方内容的间距 / h */
+#define GAP_BADGE_NEXT  0.032   /* 胶囊 -> NEXT 卡片的额外间距 / h */
 #define SHIFT_X         0.050   /* 两列整体右移 / w */
 #define STATS_LIFT      0.035   /* 统计块相对底边内边距再上抬 / h */
 #define GAP_TITLE_QR    0.022
@@ -301,8 +302,9 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                              + L->qr_px + (n_qr > 0 ? L->badge_h : 0.0);
         const double gap_sum = h * (GAP_CARD_TITLE + GAP_TITLE_QR + GAP_QR_BADGE);
         const double top     = L->cover_card_y + L->cover_card_h;
-        /* 卡片上方留一个 NEXT_GAP，避免贴住胶囊 */
-        const double bottom  = L->stats_bottom - L->next_h - h * NEXT_GAP;
+        /* 卡片上方留 NEXT_GAP + GAP_BADGE_NEXT，避免贴住胶囊 */
+        const double bottom  = L->stats_bottom - L->next_h
+                             - h * (NEXT_GAP + GAP_BADGE_NEXT);
         double       extra   = ((bottom - top) - (stack_h + gap_sum)) / 3.0;
 
         /* 空间不足时先把三处间距压到 40%，仍不足则缩小 NEXT 卡片 */

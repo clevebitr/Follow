@@ -143,7 +143,6 @@ static gpointer covercache_thread(gpointer data)
     /* 2) 远程下载 */
     if (pixbuf == NULL && job->url != NULL && *job->url != '\0') {
         HttpResponse resp = { 0 };
-
         if (http_get(job->url, &resp, 20) == 0 && resp.status == 200) {
             if (job->cache_path != NULL) {
                 g_file_set_contents(job->cache_path, resp.body, resp.length, NULL);
@@ -182,7 +181,9 @@ static gpointer covercache_thread(gpointer data)
     if (job->surface == NULL && job->error == NULL)
         job->error = g_strdup("no cover file");
 
-    g_idle_add(covercache_done, job);
+    /* 用默认优先级而不是 IDLE：界面持续 60fps 重绘时，IDLE 优先级的回调
+     * 会被一直压在后面，封面迟迟不出现。 */
+    g_idle_add_full(G_PRIORITY_DEFAULT, covercache_done, job, NULL);
     return NULL;
 }
 
