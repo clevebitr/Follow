@@ -15,17 +15,12 @@
 #include <cairo.h>
 #include <pango/pangocairo.h>
 
-/*字体：
- *   FONT_MONO  Iosevka / Noto Sans SC
- *   FONT_HAND
- * */
-
-
+/* 字体：
+ *   FONT_MONO   界面正文（Iosevka / Noto Sans SC）
+ *   FONT_CLOCK  时钟类数字，要求等宽等高
+ * 手写体（如 Segoe Print）数字宽高不一致，秒位跳变会让时钟与布局一起抖动，
+ * 因此时钟类文字统一走等宽字体；测量与绘制共用同一个宏，避免两边漂移。 */
 #define FONT_MONO "Iosevka,Noto Sans SC,Sarasa Mono SC,Cascadia Mono,Microsoft YaHei UI,monospace"
-#define FONT_HAND "Segoe Print,Caveat,Noto Sans SC,Microsoft YaHei UI,cursive"
-
-/* 时钟类文字（大时钟 / 统计墙钟）统一走等宽字体：
- * 数字等宽等高，秒位跳变不会引起宽度、行高抖动；测量与绘制共用这一个宏。 */
 #define FONT_CLOCK FONT_MONO
 
 typedef struct {
