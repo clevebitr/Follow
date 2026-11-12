@@ -87,7 +87,8 @@ static StatsBox stats_measure(cairo_t *cr, Layout *L,
                  text_width(cr, line_text, &line_style)) + STATS_TEXT_SLACK;
     text_h = box.wall_h + L->stats_gap_clock + box.line_h;
 
-    /* 7 行格子 + 6 个间隙 = 文字块高度，间隙为格高的 HEAT_GAP_RATIO */
+    /* 热力图：方块格；高度等于右侧文字块（墙钟 + 收听时长），
+     * 因此顶边与墙钟顶部齐平、底边与收听行底部齐平。 */
     L->heat_cell = MAX(2.0, text_h / (7.0 + 6.0 * HEAT_GAP_RATIO));
     L->heat_gap  = MAX(1.0, L->heat_cell * HEAT_GAP_RATIO);
     L->heat_h    = 7.0 * L->heat_cell + 6.0 * L->heat_gap;
@@ -305,6 +306,7 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     L->stats_text_x = L->stats_x + (box.w - box.text_w);
     L->stats_wall_y = L->stats_y;
     L->stats_line_y = L->stats_y + box.wall_h + L->stats_gap_clock;
+
 
 
     L->note_y = L->pad_y;

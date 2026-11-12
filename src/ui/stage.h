@@ -27,6 +27,9 @@ void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
 
 /* 切歌前调用：把当前画面拍成快照，用来退场。
  * 只有在已经有画面（canvas 有尺寸）时才有意义。 */
+/* NEXT 卡片切换动画是否在进行（主循环据此持续重绘） */
+gboolean stage_next_animating(void);
+
 void stage_snapshot(void);
 
 #endif /* FOLLOW_STAGE_H */

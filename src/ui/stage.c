@@ -381,67 +381,90 @@ static void draw_hint(cairo_t *cr, const Layout *L)
 
 /* ---------- NEXT 预告卡片 ---------- */
 
-/* 一张"宽而矮"的小组件卡片：左侧封面缩略图，右侧曲名与艺人。
- * 后面两张错位的空卡片用来表现"叠放"。 */
-static void draw_next_card(cairo_t *cr, const Layout *L)
+#define NEXT_ANIM_SEC 0.30   /* 切卡动画时长 */
+
+static gint   g_next_shown = -2;   /* 上一次绘制时显示的曲目 */
+static gint   g_next_from  = -1;   /* 切换时被推回牌堆的曲目 */
+static gint64 g_next_t0;           /* 切换起始时间（0 = 静止） */
+
+/* 卡片的封面缩略图：取不到时触发加载，随后由动画泵重绘 */
+static cairo_surface_t *next_thumb(gint idx, double *alpha)
 {
-    const APPconfig  *cfg  = config_get();
-    gint              idx  = player_queue_preview();
-    double            pad  = L->next_h * 0.13;
-    double            thumb = L->next_h - pad * 2.0;
-    TextStyle         name, artist;
-    cairo_surface_t  *img = NULL;
+    cairo_surface_t *img;
+
+    covercache_sync();
+
+    img = idx >= 0 ? covercache_surface((gsize)idx) : NULL;
+
+    *alpha = img != NULL ? 0.35 + 0.65 * covercache_reveal((gsize)idx) : 1.0;
+
+
+    return img;
+}
+
+/* 画一张卡片：底卡 + 缩略图 + 曲名 / 艺人。dy / scale 用于推进动画 */
+static void next_card_paint(cairo_t *cr, const Layout *L, gint idx,
+                            double alpha, double dy, double scale)
+{
+    const APPconfig  *cfg = config_get();
     const AudioTrack *track = NULL;
+    double            pad   = L->next_h * 0.13;
+    double            thumb = L->next_h - pad * 2.0;
+    double            cx    = L->next_x + L->next_w * 0.5;
+    double            cy    = L->next_y + L->next_h * 0.5;
+    double            img_a = 1.0;
+    cairo_surface_t  *img;
+
+    if (alpha <= 0.004)
+        return;
 
     if (idx >= 0 && idx < (gint)cfg->n_tracks)
         track = config_track_at(cfg, (gsize)idx);
 
-    /* 叠放：两张略窄、略高的底卡 */
-    for (int i = 2; i >= 1; i--) {
-        double inset = pad * 0.5 * (double)i;
-        double rise  = pad * 0.55 * (double)i;
+    cairo_save(cr);
+    cairo_translate(cr, cx, cy + dy);
+    cairo_scale(cr, scale, scale);
+    cairo_translate(cr, -cx, -cy);
 
-        color_set(cr, WHITE(0.05 * (double)(3 - i)));
-        path_round_rect(cr, L->next_x + inset, L->next_y - rise,
-                        L->next_w - inset * 2.0, L->next_h,
-                        L->card_radius * 0.8);
+    cairo_push_group(cr);
+
+    card_draw(cr, L->next_x, L->next_y, L->next_w, L->next_h, L->card_radius * 0.8);
+
+    img = next_thumb(idx, &img_a);
+
+    if (img != NULL) {
+        double iw = (double)cairo_image_surface_get_width(img);
+        double ih = (double)cairo_image_surface_get_height(img);
+        double s  = thumb / MAX(MIN(iw, ih), 1.0);
+        double ox = (thumb - iw * s) * 0.5;
+        double oy = (thumb - ih * s) * 0.5;
+
+        cairo_save(cr);
+        path_round_rect(cr, L->next_x + pad, L->next_y + pad,
+                        thumb, thumb, thumb * 0.16);
+        cairo_clip(cr);
+        cairo_translate(cr, L->next_x + pad + ox, L->next_y + pad + oy);
+        cairo_scale(cr, s, s);
+        cairo_set_source_surface(cr, img, 0.0, 0.0);
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+        cairo_paint_with_alpha(cr, img_a);
+        cairo_restore(cr);
+    } else {
+        color_set(cr, WHITE(0.07));
+        path_round_rect(cr, L->next_x + pad, L->next_y + pad,
+                        thumb, thumb, thumb * 0.16);
         cairo_fill(cr);
     }
 
-    /* 前卡 */
-    card_draw(cr, L->next_x, L->next_y, L->next_w, L->next_h, L->card_radius * 0.8);
-
-    name   = TEXT_STYLE(FONT_MONO, L->next_px, PANGO_WEIGHT_BOLD,
-                        L->next_px * 0.04, WHITE(0.92));
-    artist = TEXT_STYLE(FONT_MONO, L->next_px * 0.78, PANGO_WEIGHT_NORMAL,
-                        L->next_px * 0.10, col_dim);
-
-    if (idx >= 0) {
-        img = covercache_surface((gsize)idx);
-
-        if (img != NULL) {
-            double alpha = 0.35 + 0.65 * covercache_reveal((gsize)idx);
-
-            cairo_save(cr);
-            path_round_rect(cr, L->next_x + pad, L->next_y + pad,
-                            thumb, thumb, thumb * 0.16);
-            cairo_clip(cr);
-            cairo_set_source_surface(cr, img, L->next_x + pad, L->next_y + pad);
-            cairo_paint_with_alpha(cr, alpha);
-            cairo_restore(cr);
-        } else {
-            color_set(cr, WHITE(0.07));
-            path_round_rect(cr, L->next_x + pad, L->next_y + pad,
-                            thumb, thumb, thumb * 0.16);
-            cairo_fill(cr);
-        }
-    }
-
     {
-        double text_x = L->next_x + pad + thumb + pad * 0.9;
-        double text_w = (L->next_x + L->next_w - pad) - text_x;
-        double line1  = L->next_px * 1.45;
-        double top    = L->next_y + (L->next_h - line1 * 2.0) * 0.5;
+        double  text_x = L->next_x + pad + thumb + pad * 0.9;
+        double  text_w = (L->next_x + L->next_w - pad) - text_x;
+        double  line1  = L->next_px * 1.45;
+        double  top    = L->next_y + (L->next_h - line1 * 2.0) * 0.5;
+        TextStyle name = TEXT_STYLE(FONT_MONO, L->next_px, PANGO_WEIGHT_BOLD,
+                                    L->next_px * 0.04, WHITE(0.92));
+        TextStyle artist = TEXT_STYLE(FONT_MONO, L->next_px * 0.78,
+                                      PANGO_WEIGHT_NORMAL, L->next_px * 0.10, col_dim);
 
         if (track != NULL) {
             text_draw(cr, track->title != NULL ? track->title : "—", &name,
@@ -452,6 +475,80 @@ static void draw_next_card(cairo_t *cr, const Layout *L)
             text_draw(cr, "—", &name, text_x, top, TEXT_LEFT, text_w);
         }
     }
+
+    cairo_pop_group_to_source(cr);
+    cairo_paint_with_alpha(cr, alpha);
+    cairo_restore(cr);
+}
+
+/* 牌堆：两张错位的空卡片 */
+static void next_deck_paint(cairo_t *cr, const Layout *L, double lift)
+{
+    double pad = L->next_h * 0.13;
+
+    for (int i = 2; i >= 1; i--) {
+        double inset = pad * 0.5 * (double)i;
+        double rise  = pad * (0.55 + 0.35 * lift) * (double)i;
+
+        color_set(cr, WHITE(0.05 * (double)(3 - i)));
+        path_round_rect(cr, L->next_x + inset, L->next_y - rise,
+                        L->next_w - inset * 2.0, L->next_h,
+                        L->card_radius * 0.8);
+        cairo_fill(cr);
+    }
+}
+
+/* NEXT 预告：小标题 + 叠放卡片。切歌时旧卡被推回牌堆、新卡自前方落位。 */
+static void draw_next_card(cairo_t *cr, const Layout *L)
+{
+    gint64 now = g_get_monotonic_time();
+    gint   idx = player_queue_preview();
+    double k;
+
+    if (idx != g_next_shown) {
+        if (g_next_shown >= -1) {
+            g_next_from = g_next_shown;
+            g_next_t0   = now;
+            ui_animate();
+        }
+
+        g_next_shown = idx;
+    }
+
+    k = g_next_t0 != 0
+      ? clampd((double)(now - g_next_t0) / (NEXT_ANIM_SEC * (double)G_USEC_PER_SEC), 0.0, 1.0)
+      : 1.0;
+
+    if (k >= 1.0)
+        g_next_t0 = 0;
+
+    {
+        TextStyle tag = TEXT_STYLE(FONT_MONO, L->next_px * 0.72, PANGO_WEIGHT_NORMAL,
+                                  L->next_px * 0.24, col_dim);
+
+        text_draw(cr, "NEXT", &tag, L->next_x, L->next_label_y, TEXT_LEFT, L->next_w);
+    }
+
+    next_deck_paint(cr, L, k < 1.0 ? k : 1.0);
+
+    if (k < 1.0) {
+        /* 旧卡：向后收、上移、淡出 */
+        next_card_paint(cr, L, g_next_from, 1.0 - k, -L->next_h * 0.10 * k,
+                        1.0 - 0.06 * k);
+    }
+
+    /* 新卡：从后方放大落位 */
+    {
+        double e = 1.0 - pow(1.0 - k, 3.0);
+
+        next_card_paint(cr, L, idx, 0.45 + 0.55 * e,
+                        L->next_h * 0.12 * (1.0 - e), 0.96 + 0.04 * e);
+    }
+}
+
+gboolean stage_next_animating(void)
+{
+    return g_next_t0 != 0;
 }
 
 /* ---------- 右列：封面 + 进度条 / ♪ 曲名 ♪ / 二维码 ---------- */
@@ -502,14 +599,6 @@ static void draw_right(cairo_t *cr, const Layout *L)
 
         text_draw_block(cr, title, &style, L->title_x, L->title_y,
                         TEXT_CENTER, L->title_w, TITLE_LINES);
-    }
-
-    /* NEXT 预告：小标题 + 叠放卡片 */
-    {
-        TextStyle tag = TEXT_STYLE(FONT_MONO, L->next_px * 0.72, PANGO_WEIGHT_NORMAL,
-                                  L->next_px * 0.24, col_dim);
-
-        text_draw(cr, "NEXT", &tag, L->next_x, L->next_label_y, TEXT_LEFT, L->next_w);
     }
 
     draw_next_card(cr, L);

@@ -45,6 +45,7 @@
 #include "cache.h"
 #include "config.h"
 #include "cover.h"
+#include "covercache.h"
 #include "http.h"
 #include "keymap.h"
 #include "lyricgl.h"
@@ -173,7 +174,13 @@ static gboolean on_anim_tick(gpointer data)
     /* 歌词换行过渡：画布不可见时不算活跃（否则会空转） */
     gboolean lyric_anim  = fx_running(&app.fx_lyric) && app.canvas != NULL &&
                            gtk_widget_get_visible(app.canvas);
-    gboolean busy        = stage_anim || chrome_anim || lyric_anim;
+    gboolean next_anim   = stage_next_animating();
+    /* 缩略图淡入期间也要持续重绘，否则封面要等下一次整点重绘才出现 */
+    gboolean cover_anim  = app.canvas != NULL &&
+                           gtk_widget_get_visible(app.canvas) &&
+                           covercache_animating();
+    gboolean busy        = stage_anim || chrome_anim || lyric_anim ||
+                           next_anim || cover_anim;
 
     (void)data;
 
@@ -188,7 +195,7 @@ static gboolean on_anim_tick(gpointer data)
         gtk_widget_queue_draw(app.wallgl);
 
     if (app.canvas != NULL && gtk_widget_get_visible(app.canvas) &&
-        (stage_anim || lyric_anim || wall_cpu))
+        (stage_anim || lyric_anim || next_anim || cover_anim || wall_cpu))
         gtk_widget_queue_draw(app.canvas);
 
     if (app.chrome != NULL && gtk_widget_get_visible(app.chrome) && chrome_anim)
