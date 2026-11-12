@@ -38,13 +38,13 @@
 #define GUTTER_TEXT     1.5     /* 封面列与文本栏的间距 / pad_x */
 
 #define STATS_GAP_CLOCK 0.008   /* 墙钟 -> 时长行 / h */
-#define STATS_GAP_LINE  0.010   /* 时长行 -> 热力图 / h */
-#define STATS_CARD_GROW 1.22    /* 卡片至少比内容大 22% */
-#define STATS_SCALE_MIN 0.45    /* 窗口太矮 / 太窄时最多缩到这个比例 */
+#define HEAT_GAP_RATIO  0.30    /* 热力图格子间隙 / 格高 */
+#define STATS_GAP_HEAT  0.020   /* 热力图 -> 文字 / h */
 #define STATS_TEXT_SLACK 8.0    /* Pango 宽度是像素取整，留点余量免得误触省略号 */
 
 typedef struct {
     double w, h;                /* 内容宽 / 高 */
+    double text_w;              /* 右侧两行文字的宽度 */
     double wall_h, line_h;      /* 两行文字的真实行高 */
 } StatsBox;
 
@@ -65,22 +65,33 @@ static void stats_styles(const Layout *L, TextStyle *wall, TextStyle *line)
                        L->stats_px * 0.14, col_dim);
 }
 
-static StatsBox stats_measure(cairo_t *cr, const Layout *L,
-                             const char *wall_text, const char *line_text)
+/* 统计块：左侧热力图 + 右侧"墙钟 / 收听时长"两行文字。
+ * 热力图高度与文字块高度相等（7 行格子 + 6 个间隙解出格高）。 */
+static StatsBox stats_measure(cairo_t *cr, Layout *L,
+                              const char *wall_text, const char *line_text)
 {
     TextStyle wall_style, line_style;
     StatsBox  box;
-    double    heat_w = 12.0 * (L->heat_cell + L->heat_gap) - L->heat_gap;
+    double    text_w, text_h;
 
     stats_styles(L, &wall_style, &line_style);
 
     box.wall_h = text_height(cr, wall_text, &wall_style);
     box.line_h = text_height(cr, line_text, &line_style);
-    box.w      = MAX(heat_w, MAX(text_width(cr, wall_text, &wall_style),
-                                 text_width(cr, line_text, &line_style))
-                            + STATS_TEXT_SLACK);
-    box.h      = box.wall_h + L->stats_gap_clock
-               + box.line_h + L->stats_gap_line + L->heat_h;
+
+    text_w = MAX(text_width(cr, wall_text, &wall_style),
+                 text_width(cr, line_text, &line_style)) + STATS_TEXT_SLACK;
+    text_h = box.wall_h + L->stats_gap_clock + box.line_h;
+
+    /* 7 行格子 + 6 个间隙 = 文字块高度，间隙为格高的 HEAT_GAP_RATIO */
+    L->heat_cell = MAX(2.0, text_h / (7.0 + 6.0 * HEAT_GAP_RATIO));
+    L->heat_gap  = MAX(1.0, L->heat_cell * HEAT_GAP_RATIO);
+    L->heat_h    = 7.0 * L->heat_cell + 6.0 * L->heat_gap;
+
+    box.text_w = text_w;
+    box.w      = 12.0 * L->heat_cell + 11.0 * L->heat_gap
+               + L->stats_gap_heat + text_w;
+    box.h      = L->heat_h;
 
     return box;
 }
@@ -127,7 +138,6 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
 {
     double    cover_gap, title_gap, qr_gap, need, budget;
     StatsBox  box = { 0 };
-    double    pad_h = 0.0, pad_v = 0.0;
 
     /* 以下排版只使用参考串，绘制仍使用真实文字 */
     clock_text = CLOCK_REF;
@@ -155,58 +165,32 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     L->title_px       = clampd(h * TITLE_PX, 10.0, 44.0);
     L->stats_clock_px = clampd(h * 0.046, 12.0, 48.0);
     L->stats_px       = clampd(h * 0.019, 8.0, 18.0);
-    L->heat_cell      = clampd(h * 0.0095, 3.0, 10.0);
-    L->heat_gap       = MAX(1.0, L->heat_cell * 0.30);
-    L->heat_h         = 7.0 * (L->heat_cell + L->heat_gap) - L->heat_gap;
 
-    /* 左下角统计 */
-    L->stats_card_pad  = L->card_pad;
+    /* 统计块（无卡片衬底）：热力图贴在文字左侧，两者等高 */
     L->stats_gap_clock = h * STATS_GAP_CLOCK;
-    L->stats_gap_line  = h * STATS_GAP_LINE;
+    L->stats_gap_heat  = h * STATS_GAP_HEAT;
 
     {
         const double avail_w = MAX(w - L->pad_x * 2.0, 1.0);
         const double avail_h = MAX(h - L->pad_y * 2.0, 1.0);
-        const double base_clock = L->stats_clock_px;
-        const double base_px    = L->stats_px;
-        const double base_cell  = L->heat_cell;
-        const double base_gap   = L->heat_gap;
-        double       content_w, content_h, s = 1.0;
 
         for (int pass = 0; pass < 4; pass++) {
-            double need_w, need_h, fit;
+            double fit;
 
             box = stats_measure(cr, L, stats_wall, stats_line);
-            need_w = box.w + L->stats_card_pad * 2.0;
-            need_h = box.h + L->stats_card_pad * 2.0;
 
-            if (need_w <= avail_w && need_h <= avail_h)
+            if (box.w <= avail_w && box.h <= avail_h)
                 break;
 
-            fit = MIN(avail_w / need_w, avail_h / need_h);
-            if (s * fit < STATS_SCALE_MIN)
-                fit = STATS_SCALE_MIN / s;
-            s *= fit;
+            fit = MIN(avail_w / box.w, avail_h / box.h);
 
-            L->stats_clock_px = MAX(9.0, base_clock * s);
-            L->stats_px       = MAX(7.0, base_px * s);
-            L->heat_cell      = MAX(2.0, base_cell * s);
-            L->heat_gap       = MAX(1.0, base_gap * s);
-            L->heat_h         = 7.0 * (L->heat_cell + L->heat_gap) - L->heat_gap;
+            L->stats_clock_px = MAX(9.0, L->stats_clock_px * fit);
+            L->stats_px       = MAX(7.0, L->stats_px * fit);
         }
 
-        box       = stats_measure(cr, L, stats_wall, stats_line);
-        content_w = box.w;
-        content_h = box.h;
-
-        L->stats_w = MIN(MAX(content_w * STATS_CARD_GROW, content_w + L->stats_card_pad * 2.0),
-                         avail_w);
-        L->stats_h = MIN(MAX(content_h * STATS_CARD_GROW, content_h + L->stats_card_pad * 2.0),
-                         avail_h);
-
-        pad_h = MAX((L->stats_w - content_w) * 0.5, 0.0);
-        pad_v = MAX((L->stats_h - content_h) * 0.5, 0.0);
-
+        box        = stats_measure(cr, L, stats_wall, stats_line);
+        L->stats_w = box.w;
+        L->stats_h = box.h;
         L->stats_y = h - L->pad_y - L->stats_h;
     }
 
@@ -277,12 +261,11 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     /* 右列 */
     L->cover_card_y = L->pad_y;
     L->cover_y      = L->cover_card_y + L->card_pad;
-    L->bar_x        = L->col_x + L->card_pad;
+    L->bar_x        = L->col_cx - L->cover_px * 0.5;
     L->bar_y        = L->cover_y + L->cover_px + cover_gap;
     L->bar_w        = L->cover_px;
     L->cover_card_h = L->card_pad * 2.0 + L->cover_px + cover_gap + L->bar_h;
 
-    L->title_x = L->col_x;
     L->title_y = L->cover_card_y + L->cover_card_h + h * GAP_CARD_TITLE;
     L->qr_y    = L->title_y + L->title_px * LINE_HEIGHT * TITLE_LINES + title_gap;
     L->badge_y = L->qr_y + L->qr_px + qr_gap;
@@ -296,16 +279,20 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     }
     L->left_w = MAX(140.0, (w - L->pad_x) - L->left_x);
 
-    /* 标题左对齐在封面列内，两行可换行，宽度不越过文本栏 */
+    /* 曲名与封面同轴居中，宽度不越过文本栏；过宽时整体右移避免越出左边距 */
     L->title_w = MAX(160.0, (L->left_x - L->pad_x * 0.6) - L->col_x);
+    L->title_x = clampd(L->col_cx, L->pad_x + L->title_w * 0.5,
+                        L->left_x - L->pad_x * 0.6 - L->title_w * 0.5);
 
-    /* 统计卡片与文本栏左对齐（尺寸已在前面算好） */
-    L->stats_x         = L->left_x;
-    L->stats_content_x = L->stats_x + pad_h;
-    L->stats_content_w = MAX(L->stats_w - pad_h * 2.0, 1.0);
-    L->stats_wall_y    = L->stats_y + pad_v;
-    L->stats_line_y    = L->stats_wall_y + box.wall_h + L->stats_gap_clock;
-    L->stats_heat_y    = L->stats_line_y + box.line_h + L->stats_gap_line;
+    /* 统计块：与文本栏左对齐，热力图在左、文字在右，两者等高 */
+    L->stats_x      = L->left_x;
+    L->stats_y      = h - L->pad_y - L->stats_h;
+    L->stats_w      = box.w;
+    L->stats_heat_x = L->stats_x;
+    L->stats_heat_y = L->stats_y;
+    L->stats_text_x = L->stats_x + (box.w - box.text_w);
+    L->stats_wall_y = L->stats_y;
+    L->stats_line_y = L->stats_y + box.wall_h + L->stats_gap_clock;
 
     L->note_y = L->pad_y;
 

@@ -39,14 +39,14 @@ typedef struct {
     double qr_px, qr_y, cell_w, cell_gap;
     double badge_h, badge_y, badge_w;
 
-    /* 左下角统计*/
-    double stats_x, stats_y, stats_w, stats_h;          /* 卡片矩形 */
-    double stats_content_x;                             /* 内容左边缘 */
-    double stats_content_w;                             /* 内容可用宽度（超了就用省略号） */
-    double stats_wall_y, stats_line_y, stats_heat_y;    /* 墙钟 / 时长行 / 热力图上沿 */
+    /* 统计块（无衬底）：左侧热力图 + 右侧墙钟 / 收听时长 */
+    double stats_x, stats_y, stats_w, stats_h;          /* 整块外框 */
+    double stats_heat_x, stats_heat_y;                  /* 热力图左上角 */
+    double stats_text_x;                                /* 文字列左边界 */
+    double stats_wall_y, stats_line_y;                  /* 墙钟 / 时长行上沿 */
     double stats_clock_px, stats_px;
     double heat_cell, heat_gap, heat_h;
-    double stats_card_pad, stats_gap_clock, stats_gap_line;
+    double stats_gap_clock, stats_gap_heat;
 
     int n_qr;
 } Layout;

@@ -142,23 +142,23 @@ static gchar *stats_summary(void)
     return g_strdup_printf("LISTENED %s  ·  TODAY %s", total, today);
 }
 
-/* 墙钟 + 收听时长 + 热力图：位置全部由 layout_compute() 给定 */
+/* 热力图 + 墙钟 + 收听时长：无卡片衬底，位置全部由 layout_compute() 给出。
+ * 热力图在左，高度与右侧两行文字的总高一致。 */
 static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gchar *line)
 {
     TextStyle wall_style = TEXT_STYLE(FONT_HAND, L->stats_clock_px, PANGO_WEIGHT_NORMAL,
                                      0.0, WHITE(0.78));
     TextStyle line_style = TEXT_STYLE(FONT_MONO, L->stats_px, PANGO_WEIGHT_NORMAL,
                                      L->stats_px * 0.14, col_dim);
+    double    text_w = MAX(L->stats_w - (L->stats_text_x - L->stats_x), 1.0);
 
-    card_draw(cr, L->stats_x, L->stats_y, L->stats_w, L->stats_h, L->card_radius);
+    draw_heatmap(cr, L, L->stats_heat_x, L->stats_heat_y);
 
-    /* 限宽 = 卡片内容宽度：极端窄窗口下至少会用省略号收住，不会冲出卡片 */
-    text_draw(cr, wall, &wall_style, L->stats_content_x, L->stats_wall_y,
-              TEXT_LEFT, L->stats_content_w);
-    text_draw(cr, line, &line_style, L->stats_content_x, L->stats_line_y,
-              TEXT_LEFT, L->stats_content_w);
-
-    draw_heatmap(cr, L, L->stats_content_x, L->stats_heat_y);
+    /* 限宽 = 文字列宽：极端窄窗口下用省略号收住 */
+    text_draw(cr, wall, &wall_style, L->stats_text_x, L->stats_wall_y,
+              TEXT_LEFT, text_w);
+    text_draw(cr, line, &line_style, L->stats_text_x, L->stats_line_y,
+              TEXT_LEFT, text_w);
 }
 
 /* 歌词。
@@ -385,7 +385,7 @@ static void draw_right(cairo_t *cr, const Layout *L)
     const double position = media_position(&app.media);
     const double duration = media_duration(&app.media);
     g_autofree gchar *label = player_label();
-    double card_x = L->col_x;
+    double card_x = L->col_cx - (L->cover_px + L->card_pad * 2.0) * 0.5;
 
     /* 封面和进度条装在同一个衬底里 */
     card_draw(cr, card_x, L->cover_card_y, L->cover_px + L->card_pad * 2.0,
@@ -414,7 +414,7 @@ static void draw_right(cairo_t *cr, const Layout *L)
                                             L->title_px * 0.05, col_text);
 
         text_draw_block(cr, title, &style, L->title_x, L->title_y,
-                        TEXT_LEFT, L->title_w, TITLE_LINES);
+                        TEXT_CENTER, L->title_w, TITLE_LINES);
     }
 
     qrcard_draw(cr, L);

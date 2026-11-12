@@ -37,6 +37,8 @@
 #define POS_DAMP_MULT        2.2
 #define POS_INTERVAL_EXP     0.2   /* 开五次方根，偏向更快的速度 */
 
+/* 间距上限（相对标称 gap，用于区域富余时放宽） */
+#define GAP_MAX_K        1.6
 /* 阶梯延迟：每往下一行累积，步长按 1/1.05 递减 */
 #define STAGGER_SEC         0.05
 #define STAGGER_DECAY       (1.0 / 1.05)
@@ -1750,14 +1752,15 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
         for (int i = 0; i < n; i++)
             slot = MAX(slot, stack[i]->h);
 
-        /* 间距：默认 geom->gap，区域不足时收窄（取值固定，不随行数变化） */
+        /* 间距：区域不足时收窄，富余时可放宽到标称值的 GAP_MAX_K 倍 */
         gap = geom->gap;
 
         {
             double room = (geom->height - (double)LYRIC_SLOT_N * slot)
                         / (double)(LYRIC_SLOT_N - 1);
 
-            gap = CLAMP(MIN(gap, room), geom->px * 0.18, geom->gap);
+            gap = CLAMP(MIN(room, geom->gap * GAP_MAX_K),
+                        geom->px * 0.18, geom->gap * GAP_MAX_K);
         }
 
         pitch = slot + gap;
@@ -1776,10 +1779,10 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
             }
         }
 
-        /* 区域有余量时整体下移，上限 0.35 字 */
+        /* 区域有余量时整体居中，下移量上限 1.2 字 */
         top_off = (geom->height - ((double)LYRIC_SLOT_N * slot
                                   + (double)(LYRIC_SLOT_N - 1) * gap)) * 0.5;
-        top_off = CLAMP(top_off, 0.0, geom->px * 0.35);
+        top_off = CLAMP(top_off, 0.0, geom->px * 1.2);
 
         /* 阶梯延迟：越往下的行越晚起跑，延迟按 1/1.05 递减 */
         delay = 0.0;
