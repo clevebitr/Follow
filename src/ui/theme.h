@@ -24,6 +24,10 @@
 #define FONT_MONO "Iosevka,Noto Sans SC,Sarasa Mono SC,Cascadia Mono,Microsoft YaHei UI,monospace"
 #define FONT_HAND "Segoe Print,Caveat,Noto Sans SC,Microsoft YaHei UI,cursive"
 
+/* 时钟类文字（大时钟 / 统计墙钟）统一走等宽字体：
+ * 数字等宽等高，秒位跳变不会引起宽度、行高抖动；测量与绘制共用这一个宏。 */
+#define FONT_CLOCK FONT_MONO
+
 typedef struct {
     double r, g, b, a;
 } Rgba;

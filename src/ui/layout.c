@@ -54,7 +54,7 @@ typedef struct {
 
 static TextStyle measure_style(double px)
 {
-    return TEXT_STYLE(FONT_HAND, px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
+    return TEXT_STYLE(FONT_CLOCK, px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
 }
 
 double lyric_slot_h(double px)
@@ -64,7 +64,7 @@ double lyric_slot_h(double px)
 
 static void stats_styles(const Layout *L, TextStyle *wall, TextStyle *line)
 {
-    *wall = TEXT_STYLE(FONT_HAND, L->stats_clock_px, PANGO_WEIGHT_NORMAL, 0.0, WHITE(0.78));
+    *wall = TEXT_STYLE(FONT_CLOCK, L->stats_clock_px, PANGO_WEIGHT_NORMAL, 0.0, WHITE(0.78));
     *line = TEXT_STYLE(FONT_MONO, L->stats_px, PANGO_WEIGHT_NORMAL,
                        L->stats_px * 0.14, col_dim);
 }

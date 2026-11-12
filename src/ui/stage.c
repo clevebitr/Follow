@@ -147,7 +147,7 @@ static gchar *stats_summary(void)
  * 热力图在左，高度与右侧两行文字的总高一致。 */
 static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gchar *line)
 {
-    TextStyle wall_style = TEXT_STYLE(FONT_HAND, L->stats_clock_px, PANGO_WEIGHT_NORMAL,
+    TextStyle wall_style = TEXT_STYLE(FONT_CLOCK, L->stats_clock_px, PANGO_WEIGHT_NORMAL,
                                      0.0, WHITE(0.78));
     TextStyle line_style = TEXT_STYLE(FONT_MONO, L->stats_px, PANGO_WEIGHT_NORMAL,
                                      L->stats_px * 0.14, col_dim);
@@ -326,7 +326,7 @@ static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
     }
 
     /* 大时钟 */
-    style = TEXT_STYLE(FONT_HAND, L->clock_px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
+    style = TEXT_STYLE(FONT_CLOCK, L->clock_px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
     text_draw(cr, clock_text, &style, L->left_x, L->clock_y, TEXT_LEFT, 0.0);
 
     /* 歌词 / 状态：有错误或加载中就先报状态，否则画歌词 */
