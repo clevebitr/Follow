@@ -101,6 +101,27 @@ double text_height(cairo_t *cr, const char *text, const TextStyle *style)
     return (double)height;
 }
 
+/* 墨迹（实际绘制部分）相对排版框顶部的下边界。
+ * 手写体等字体的排版框留白很大（158px 的字排版框可达 277px），
+ * 需要贴合字形排版时应使用墨迹而非框高。无墨迹时返回 0。 */
+double text_ink_bottom(cairo_t *cr, const char *text, const TextStyle *style)
+{
+    PangoLayout   *layout;
+    PangoRectangle ink;
+
+    if (text == NULL || *text == '\0' || style->px <= 0.0)
+        return 0.0;
+
+    layout = build_layout(cr, text, style);
+    pango_layout_get_pixel_extents(layout, &ink, NULL);
+    g_object_unref(layout);
+
+    if (ink.width <= 0 && ink.height <= 0)
+        return 0.0;
+
+    return (double)(ink.y + ink.height);
+}
+
 void text_draw(cairo_t *cr, const char *text, const TextStyle *style,
                double x, double y, int align, double max_width)
 {
@@ -311,7 +332,7 @@ cairo_surface_t *text_mask_surface(const char *text, const TextStyle *style,
 
 /* 把 utf8 字符在整句里的位置（0..255）写成灰度属性，然后渲染出来。
  * 结果是一张和字形遮罩逐像素对齐的"时间坐标图"：
- *   GPU 上拿它和播放进度比较，就能做出 AMLL 那种从左到右逐个字亮起的效果。
+ *   GPU 上拿它和播放进度比较，就能实现从左到右逐字亮起的效果。
  * base / total 是这段文字在整句里的起始字序号和整句字数（折行后仍然连续）。 */
 static void build_order_attrs(PangoLayout *layout, const char *text,
                               const guint8 *order, int n_order)

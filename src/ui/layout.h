@@ -27,6 +27,7 @@ typedef struct {
     double lyric_next_px;       /* 预显示的下一行字号（和当前行同号） */
     double lyric_area_h;        /* 歌词可视区域高度（lyric_y -> lyric_bottom） */
     double lyric_gap;           /* 当前行 -> 下一行 的间距 */
+    double lyric_slot_h;        /* 一行歌词的固定槽高（两行字高） */
     double hint_px, hint_y;     /* SHUFFLE / REPEAT / LRC 偏移 */
 
     /* 右列：封面 + 进度条 / 曲名 / 二维码 + 胶囊 */
@@ -50,11 +51,22 @@ typedef struct {
     int n_qr;
 } Layout;
 
-/* 算出整屏几何。
- *   clock_text 用来量时钟宽度
- *   n_qr 0 / 1 / 2：没有二维码、单个、并排两个
- *   stats_wall / stats_line 是统计卡片里的两行文字，用真实字号量行高；
- *   NULL 表示按空内容量 */
+/* 歌词槽位（layout 与 lyricgl 共用，修改此处两边同时生效）：
+ * 预推出列 / 当前句 / 预演一 / 预演二 各占一个“两行字高”的固定槽，
+ * 槽高与折行数无关，因此行距不随长句变化。 */
+#define LYRIC_SLOT_N    4
+#define LYRIC_SLOT_ROWS 2
+#define LYRIC_ROW_EM    1.30    /* 单行文字行高与字号之比 */
+#define LYRIC_CLOCK_MIN 0.85    /* 为歌词区让位时时钟的最小缩放比例 */
+
+/* 歌词槽高度（逻辑像素） */
+double lyric_slot_h(double px);
+
+/* 计算整屏几何。
+ *   clock_text 用于测量时钟宽度
+ *   n_qr 0 / 1 / 2：无二维码、单个、并排两个
+ *   stats_wall / stats_line 为统计卡片的两行文字，用于测量行高；
+ *   NULL 表示按空内容测量 */
 void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                     const char *clock_text, int n_qr,
                     const char *stats_wall, const char *stats_line);

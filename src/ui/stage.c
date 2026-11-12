@@ -168,7 +168,13 @@ static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gc
  *
  * cairo 回退（没有 GL）：只画当前行 + 下一行，同样左对齐、自动折行、不发光。 */
 
-/* 当前句的高亮色：取封面种子色，但拉亮 / 提饱和到能在深色背景上认出来 */
+/* 当前句高亮色：取封面种子色并降低鲜艳度。保留色相，亮度上限 0.80、
+ * 饱和度乘 0.55，再向白色混合 10%，与周围白字连贯且仍可区分。 */
+#define ACCENT_VALUE   0.80   /* 亮度上限 */
+#define ACCENT_FLOOR   0.66   /* 太暗的封面抬到这个亮度 */
+#define ACCENT_SATUR   0.55   /* 饱和度系数 */
+#define ACCENT_WHITE   0.10   /* 往白字混的比例 */
+
 static Rgba seed_accent(void)
 {
     const Palette *p = &app.palette;
@@ -176,33 +182,43 @@ static Rgba seed_accent(void)
     double         g = p->has ? p->seed_g : 0.74;
     double         b = p->has ? p->seed_b : 0.98;
     double         mx = MAX(r, MAX(g, b));
-    double         mn = MIN(r, MIN(g, b));
+    double         avg;
 
-    /* 太暗就整体抬起（保色相）；太灰就把离灰的距离拉开一点 */
-    if (mx > 0.001 && mx < 0.72) {
-        double k = 0.72 / mx;
+    /* 亮度：过暗的抬高（保持色相），过亮的压低 */
+    if (mx > 0.001 && mx < ACCENT_FLOOR) {
+        double k = ACCENT_FLOOR / mx;
 
         r *= k;
         g *= k;
         b *= k;
-    } else if (mx > 0.001) {
-        double k = 0.95 / mx;
+    } else if (mx > ACCENT_VALUE) {
+        double k = ACCENT_VALUE / mx;
 
         r *= k;
         g *= k;
         b *= k;
     }
 
-    if (mx - mn < 0.22) {
-        double avg = (r + g + b) / 3.0;
-        double sat = 0.22 / MAX(mx - mn, 0.001);
+    /* 饱和度：向同亮度灰靠拢，色相不变 */
+    avg = (r + g + b) / 3.0;
+    r   = avg + (r - avg) * ACCENT_SATUR;
+    g   = avg + (g - avg) * ACCENT_SATUR;
+    b   = avg + (b - avg) * ACCENT_SATUR;
 
-        r = avg + (r - avg) * sat;
-        g = avg + (g - avg) * sat;
-        b = avg + (b - avg) * sat;
+    /* 向白色轻微混合，使与白字的过渡更自然 */
+    r += (1.0 - r) * ACCENT_WHITE;
+    g += (1.0 - g) * ACCENT_WHITE;
+    b += (1.0 - b) * ACCENT_WHITE;
+
+    /* 封面本身为灰时补一点冷色底，避免高亮与白字难以区分 */
+    if (MAX(r, MAX(g, b)) - MIN(r, MIN(g, b)) < 0.06) {
+        r += 0.02;
+        g += 0.05;
+        b += 0.10;
     }
 
-    return RGBA(clampd(r, 0.0, 1.0), clampd(g, 0.0, 1.0), clampd(b, 0.0, 1.0), 1.0);
+    return RGBA(clampd(r, 0.0, 1.0), clampd(g, 0.0, 1.0),
+                clampd(b, 0.0, 1.0), 1.0);
 }
 
 static gboolean draw_lyrics(cairo_t *cr, const Layout *L)

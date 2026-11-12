@@ -177,6 +177,10 @@ static gboolean on_anim_tick(gpointer data)
 
     (void)data;
 
+    /* 窗口拖动或缩放期间不发动画重绘 */
+    if (app.win_dragging)
+        return G_SOURCE_CONTINUE;
+
     /* GL 墙由 wallgl 的 frame clock tick 在 vsync 上重建；这个 16ms 泵
      * 只在 pending 时 queue_draw，让 tick 持续跑。墙控件在开 / 关时会被
      * 隐藏，tick 会通过 map / unmap 信号重新挂上。 */
@@ -941,18 +945,20 @@ static void on_fullscreen_changed(GObject *object, GParamSpec *pspec,
     }
 }
 
-#if !defined(_WIN32)
-static void on_window_resize_press(GtkGestureClick *gesture, int n_press,
-                                   double x, double y, gpointer data)
+/* 无边框窗口：仅接管边缘缩放，交给 GDK 的拖拽上下文（内部按屏幕坐标
+ * 跟踪指针）。按客户区坐标自行计算位移会与窗口移动形成负反馈。
+ * 标题栏拖动不接管：GtkWindowHandle 的手势会走 gdk_toplevel_begin_move，
+ * 同一次拖动不能由两处实现同时处理。 */
+static void on_window_drag_begin(GtkGestureDrag *gesture, double x, double y,
+                                 gpointer data)
 {
     GtkWidget     *window = app.window;
-    int            w, h;
-    const int      edge = 5;
-    GdkSurfaceEdge e = (GdkSurfaceEdge)-1;
+    GdkSurfaceEdge  e = (GdkSurfaceEdge)-1;
     GdkSurface    *surface;
     GdkDevice     *device;
+    int            w, h;
+    const int      edge = 5;
 
-    (void)n_press;
     (void)data;
 
     if (window == NULL)
@@ -990,152 +996,45 @@ static void on_window_resize_press(GtkGestureClick *gesture, int n_press,
         gtk_event_controller_get_current_event_time(
             GTK_EVENT_CONTROLLER(gesture)));
     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+
+    /* 缩放期间暂停动画重绘 */
+    app.win_dragging = TRUE;
+    lyricgl_drag_state(TRUE);
 }
-#endif
 
-#if defined(_WIN32)
-typedef struct {
-    int  mode;      /* 1 = move, 2 = resize */
-    int  edges;     /* 1 N, 2 S, 4 W, 8 E */
-    RECT start;
-} WindowDrag;
-
-static WindowDrag g_window_drag;
-
-static HWND window_hwnd(void)
+/* 缩放结束或被中断：GDK 的拖拽上下文自行收尾，此处恢复动画 */
+static void window_drag_finish(void)
 {
-    GdkSurface *surface;
+    if (!app.win_dragging)
+        return;
 
-    if (app.window == NULL)
-        return NULL;
+    app.win_dragging = FALSE;
+    lyricgl_drag_state(FALSE);
 
-    surface = gtk_native_get_surface(gtk_widget_get_native(app.window));
-    if (surface == NULL)
-        return NULL;
-
-    return (HWND)gdk_win32_surface_get_handle(surface);
+    if (app.canvas != NULL)
+        gtk_widget_queue_draw(app.canvas);
 }
 
-static void win_drag_begin(GtkGestureDrag *gesture, double sx, double sy,
-                           gpointer data)
-{
-    GtkWidget      *window = app.window;
-    GtkWidget      *picked;
-    GtkWidget      *handle;
-    graphene_rect_t bounds;
-    HWND            hwnd;
-    int             w, h;
-    const int       edge = 5;
-
-    (void)data;
-
-    g_window_drag.mode  = 0;
-    g_window_drag.edges = 0;
-
-    if (window == NULL)
-        return;
-
-    w = gtk_widget_get_width(window);
-    h = gtk_widget_get_height(window);
-
-    picked = gtk_widget_pick(window, sx, sy, GTK_PICK_DEFAULT);
-    if (picked != NULL &&
-        gtk_widget_get_ancestor(picked, GTK_TYPE_BUTTON) != NULL)
-        return;
-
-    if (sx <= edge)             g_window_drag.edges |= 4;
-    if (sx >= w - edge)         g_window_drag.edges |= 8;
-    if (sy <= edge)             g_window_drag.edges |= 1;
-    if (sy >= h - edge)         g_window_drag.edges |= 2;
-
-    if (g_window_drag.edges != 0) {
-        g_window_drag.mode = 2;
-    } else {
-        handle = app.header_bar != NULL ? gtk_widget_get_parent(app.header_bar)
-                                        : NULL;
-
-        if (handle != NULL &&
-            gtk_widget_compute_bounds(handle, window, &bounds) &&
-            sy >= bounds.origin.y &&
-            sy <= bounds.origin.y + bounds.size.height)
-            g_window_drag.mode = 1;
-    }
-
-    if (g_window_drag.mode == 0)
-        return;
-
-    hwnd = window_hwnd();
-    if (hwnd == NULL) {
-        g_window_drag.mode = 0;
-        return;
-    }
-
-    GetWindowRect(hwnd, &g_window_drag.start);
-    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-}
-
-static void win_drag_update(GtkGestureDrag *gesture, double ox, double oy,
-                            gpointer data)
-{
-    HWND hwnd;
-    int  x, y, w, h;
-    const int min_w = 640;
-    const int min_h = 360;
-
-    (void)gesture;
-    (void)data;
-
-    if (g_window_drag.mode == 0)
-        return;
-
-    hwnd = window_hwnd();
-    if (hwnd == NULL)
-        return;
-
-    x = g_window_drag.start.left;
-    y = g_window_drag.start.top;
-    w = g_window_drag.start.right  - g_window_drag.start.left;
-    h = g_window_drag.start.bottom - g_window_drag.start.top;
-
-    if (g_window_drag.mode == 1) {
-        SetWindowPos(hwnd, NULL, x + (int)ox, y + (int)oy, 0, 0,
-                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        return;
-    }
-
-    if (g_window_drag.edges & 4) { x += (int)ox; w -= (int)ox; }
-    if (g_window_drag.edges & 8) { w += (int)ox; }
-    if (g_window_drag.edges & 1) { y += (int)oy; h -= (int)oy; }
-    if (g_window_drag.edges & 2) { h += (int)oy; }
-
-    if (w < min_w) {
-        if (g_window_drag.edges & 4)
-            x -= min_w - w;
-        w = min_w;
-    }
-
-    if (h < min_h) {
-        if (g_window_drag.edges & 1)
-            y -= min_h - h;
-        h = min_h;
-    }
-
-    SetWindowPos(hwnd, NULL, x, y, w, h,
-                 SWP_NOZORDER | SWP_NOACTIVATE);
-}
-
-static void win_drag_end(GtkGestureDrag *gesture, double ox, double oy,
-                         gpointer data)
+static void on_window_drag_end(GtkGestureDrag *gesture, double ox, double oy,
+                               gpointer data)
 {
     (void)gesture;
     (void)ox;
     (void)oy;
     (void)data;
 
-    g_window_drag.mode  = 0;
-    g_window_drag.edges = 0;
+    window_drag_finish();
 }
-#endif
+
+static void on_window_drag_cancel(GtkGesture *gesture, GdkEventSequence *seq,
+                                  gpointer data)
+{
+    (void)gesture;
+    (void)seq;
+    (void)data;
+
+    window_drag_finish();
+}
 
 static void activate(GtkApplication *app_, gpointer user_data)
 {
@@ -1241,35 +1140,21 @@ static void activate(GtkApplication *app_, gpointer user_data)
 
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
 
-#if defined(_WIN32)
     {
-        GtkGesture *drag = gtk_gesture_drag_new();
-
-        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag),
-                                      GDK_BUTTON_PRIMARY);
-        gtk_event_controller_set_propagation_phase(
-            GTK_EVENT_CONTROLLER(drag), GTK_PHASE_CAPTURE);
-        g_signal_connect(drag, "drag-begin",
-                         G_CALLBACK(win_drag_begin), NULL);
-        g_signal_connect(drag, "drag-update",
-                         G_CALLBACK(win_drag_update), NULL);
-        g_signal_connect(drag, "drag-end",
-                         G_CALLBACK(win_drag_end), NULL);
-        gtk_widget_add_controller(window, GTK_EVENT_CONTROLLER(drag));
-    }
-#else
-    {
-        GtkGesture *resize = gtk_gesture_click_new();
+        GtkGesture *resize = gtk_gesture_drag_new();
 
         gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(resize),
                                       GDK_BUTTON_PRIMARY);
         gtk_event_controller_set_propagation_phase(
             GTK_EVENT_CONTROLLER(resize), GTK_PHASE_CAPTURE);
-        g_signal_connect(resize, "pressed",
-                         G_CALLBACK(on_window_resize_press), NULL);
+        g_signal_connect(resize, "drag-begin",
+                         G_CALLBACK(on_window_drag_begin), NULL);
+        g_signal_connect(resize, "drag-end",
+                         G_CALLBACK(on_window_drag_end), NULL);
+        g_signal_connect(resize, "cancel",
+                         G_CALLBACK(on_window_drag_cancel), NULL);
         gtk_widget_add_controller(window, GTK_EVENT_CONTROLLER(resize));
     }
-#endif
 
 #if defined(_WIN32)
     g_signal_connect(window, "realize", G_CALLBACK(on_window_realize), NULL);

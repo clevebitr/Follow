@@ -49,6 +49,7 @@ typedef struct {
 
     /* 画面刷新 */
     gboolean dirty;
+    gboolean win_dragging;   /* 窗口拖动 / 缩放中：暂停动画 */
     gboolean chrome_dirty;   /* 歌曲墙表头 / 底栏需要重画 */
     gboolean help;
     gboolean last_playing;

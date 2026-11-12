@@ -466,6 +466,10 @@ gboolean backdrop_tick(gpointer data)
     if (width <= 0 || height <= 0 || !gtk_widget_get_mapped(app.window))
         return G_SOURCE_CONTINUE;
 
+    /* 拖动或缩放窗口期间暂停动画，保证窗口响应 */
+    if (app.win_dragging)
+        return G_SOURCE_CONTINUE;
+
     /* 歌曲墙自己就是全屏画面：暂停背景粒子/模糊，把 CPU 让给磁贴动画 */
     if (playlist_is_open() && !playlist_is_closing())
         return G_SOURCE_CONTINUE;

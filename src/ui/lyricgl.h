@@ -53,4 +53,8 @@ void       lyricgl_set_view(const Lyrics *lyrics, gssize index,
 /* 停掉一切并清空（换曲目 / 退出） */
 void       lyricgl_clear(void);
 
+/* 窗口拖动 / 缩放期间暂停逐帧重绘（此时整窗每帧重合成，叠加歌词动画会掉帧）。
+ * 传入 FALSE 时恢复并补绘一帧。 */
+void       lyricgl_drag_state(gboolean dragging);
+
 #endif /* FOLLOW_LYRICGL_H */

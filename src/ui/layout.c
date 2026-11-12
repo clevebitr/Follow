@@ -52,6 +52,11 @@ static TextStyle measure_style(double px)
     return TEXT_STYLE(FONT_HAND, px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
 }
 
+double lyric_slot_h(double px)
+{
+    return px * LYRIC_ROW_EM * (double)LYRIC_SLOT_ROWS;
+}
+
 static void stats_styles(const Layout *L, TextStyle *wall, TextStyle *line)
 {
     *wall = TEXT_STYLE(FONT_HAND, L->stats_clock_px, PANGO_WEIGHT_NORMAL, 0.0, WHITE(0.78));
@@ -79,12 +84,52 @@ static StatsBox stats_measure(cairo_t *cr, const Layout *L,
     return box;
 }
 
+static void clock_place(Layout *L, cairo_t *cr, const char *clock_text, double h)
+{
+    TextStyle style = measure_style(L->clock_px);
+    double    ink;
+
+    L->clock_w = text_width(cr, clock_text, &style);
+
+    /* 时钟过宽时缩字号，避免压到右列 */
+    if (L->clock_w > L->left_w && L->clock_w > 0.0) {
+        L->clock_px *= L->left_w / L->clock_w;
+        style        = measure_style(L->clock_px);
+        L->clock_w   = text_width(cr, clock_text, &style);
+    }
+
+    L->clock_h = text_height(cr, clock_text, &style);
+
+    /* 手写体上沿留白较大，向上提一点以贴合上面的备注 */
+    L->clock_y = L->note_y + L->note_px * LINE_HEIGHT + h * GAP_NOTE_CLOCK
+               - L->clock_px * 0.10;
+
+    /* 歌词区上沿取时钟的墨迹底边：手写体排版框底部留白很大，
+     * 按框高排会多占一百多像素 */
+    ink = text_ink_bottom(cr, clock_text, &style);
+    if (ink <= 0.0)
+        ink = L->clock_h;
+
+    L->lyric_y = L->clock_y + ink + h * GAP_CLOCK_LYRIC;
+}
+
+/* 测量统一使用固定参考串而非实时内容：时钟每秒变化、统计行每小时变化，
+ * 手写体又是比例字体，用实时文字测得的卡片尺寸 / 歌词区下沿 / 歌词宽度会
+ * 随之逐帧微调。参考串与真实内容字数一致，测量结果恒定。 */
+#define CLOCK_REF        "88:88:88"   /* 比例字体里 8 最宽：真实内容不会超参考串 */
+#define STATS_WALL_REF   "88:88:88"
+#define STATS_LINE_REF   "LISTENED 88h 88m  ·  TODAY 88m"
+
 void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                     const char *clock_text, int n_qr,
                     const char *stats_wall, const char *stats_line)
 {
-    TextStyle clock_style;
     double    cover_gap, title_gap, qr_gap, need, budget;
+
+    /* 以下排版只使用参考串，绘制仍使用真实文字 */
+    clock_text = CLOCK_REF;
+    stats_wall = STATS_WALL_REF;
+    stats_line = STATS_LINE_REF;
 
     memset(L, 0, sizeof(*L));
 
@@ -250,27 +295,33 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
 
     L->note_y = L->pad_y;
 
-    /* 时钟太长就缩字号，保证永远压不到右列 */
-    clock_style = measure_style(L->clock_px);
-    L->clock_w  = text_width(cr, clock_text, &clock_style);
+    /* 时钟与歌词：先按当前时钟字号试排歌词区，容不下四个槽则逐步缩小时钟
+     * （下限 LYRIC_CLOCK_MIN），仍不足时由 lyricgl 收窄间距。 */
+    {
+        const double orig_px = L->clock_px;
+        const double slot    = lyric_slot_h(L->lyric_px);
+        const double want    = (double)LYRIC_SLOT_N * slot
+                             + (double)(LYRIC_SLOT_N - 1) * L->lyric_gap;
+        const double limit   = L->hint_y - h * GAP_LYRIC_HINT;
 
-    if (L->clock_w > L->left_w && L->clock_w > 0.0) {
-        L->clock_px *= L->left_w / L->clock_w;
-        clock_style  = measure_style(L->clock_px);
-        L->clock_w   = text_width(cr, clock_text, &clock_style);
+        clock_place(L, cr, clock_text, h);
+
+        for (int pass = 0; pass < 6; pass++) {
+            double avail = limit - L->lyric_y;
+            double shrink;
+
+            if (want <= avail || L->clock_px <= orig_px * LYRIC_CLOCK_MIN + 0.01)
+                break;
+
+            shrink = CLAMP(1.0 - (want - avail) / L->clock_h, 0.97, 1.0);
+            L->clock_px = MAX(orig_px * LYRIC_CLOCK_MIN, L->clock_px * shrink);
+
+            clock_place(L, cr, clock_text, h);
+        }
     }
 
-    L->clock_h = text_height(cr, clock_text, &clock_style);
-
-    /* 手写体的上沿留白很大，往上提一点，视觉上才贴着上面的备注 */
-    L->clock_y = L->note_y + L->note_px * LINE_HEIGHT + h * GAP_NOTE_CLOCK
-               - L->clock_px * 0.10;
-
-    L->lyric_y = L->clock_y + L->clock_h + h * GAP_CLOCK_LYRIC;
-
-    /* 歌词可视区域：时钟下方 -> 提示行上方。
-     * 顺序很重要：先算出 lyric_y 再用它算高度，否则底边会一路顶到统计卡片里
-     * （提示行、方向、时长这些小组件都会被歌词压住）。 */
+    /* 歌词可视区域：时钟墨迹下方至提示行上方 */
+    L->lyric_slot_h = lyric_slot_h(L->lyric_px);
     L->lyric_bottom = MAX(L->lyric_y + L->lyric_px * 1.45,
                           L->hint_y - h * GAP_LYRIC_HINT);
     L->lyric_area_h = L->lyric_bottom - L->lyric_y;

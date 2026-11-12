@@ -61,6 +61,10 @@ void text_draw(cairo_t *cr, const char *text, const TextStyle *style,
 double text_block_height(cairo_t *cr, const char *text, const TextStyle *style,
                          double max_width, int max_lines);
 
+/* 墨迹（实际绘制部分）相对排版框顶部的下边界；
+ * 手写体排版框底部留白很大，贴合字形排版时应使用墨迹。 */
+double text_ink_bottom(cairo_t *cr, const char *text, const TextStyle *style);
+
 /* 把一段文字画成一张 A8 字形遮罩（给 GPU 当纹理用）：
  * 四周各留 pad 像素（发光要的余地），文字块左上角在 (pad, pad)。
  * 排版规则和 text_draw_block 完全一致（同样的宽度 / 对齐 / 行数）。

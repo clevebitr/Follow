@@ -14,5 +14,5 @@ auto-breakpoint: false
 
 ## Current
 
-goal: 四列歌词：预推出/当前/预演一/预演二 + 种子色高亮
-breakpoint: 四列+种子色+交错间隙已实测；等用户确认观感
+goal: 歌词动效统一 + 拖动跟手
+breakpoint: 拖动已加：FBO 取整 + 拖动暂停动画 + 几何抖动抑制；等实测拖动手感
