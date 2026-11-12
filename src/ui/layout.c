@@ -35,6 +35,7 @@
 #define GAP_QR_BADGE    0.045
 
 #define LINE_HEIGHT     1.45    /* 一行等宽文字占的高度 / 字号 */
+#define GUTTER_TEXT     1.5     /* 封面列与文本栏的间距 / pad_x */
 
 #define STATS_GAP_CLOCK 0.008   /* 墙钟 -> 时长行 / h */
 #define STATS_GAP_LINE  0.010   /* 时长行 -> 热力图 / h */
@@ -125,6 +126,8 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                     const char *stats_wall, const char *stats_line)
 {
     double    cover_gap, title_gap, qr_gap, need, budget;
+    StatsBox  box = { 0 };
+    double    pad_h = 0.0, pad_v = 0.0;
 
     /* 以下排版只使用参考串，绘制仍使用真实文字 */
     clock_text = CLOCK_REF;
@@ -168,8 +171,7 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
         const double base_px    = L->stats_px;
         const double base_cell  = L->heat_cell;
         const double base_gap   = L->heat_gap;
-        StatsBox     box;
-        double       content_w, content_h, pad_h, pad_v, s = 1.0;
+        double       content_w, content_h, s = 1.0;
 
         for (int pass = 0; pass < 4; pass++) {
             double need_w, need_h, fit;
@@ -205,13 +207,7 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
         pad_h = MAX((L->stats_w - content_w) * 0.5, 0.0);
         pad_v = MAX((L->stats_h - content_h) * 0.5, 0.0);
 
-        L->stats_x         = L->pad_x;
-        L->stats_y         = h - L->pad_y - L->stats_h;
-        L->stats_content_x = L->stats_x + pad_h;
-        L->stats_content_w = MAX(L->stats_w - pad_h * 2.0, 1.0);
-        L->stats_wall_y    = L->stats_y + pad_v;
-        L->stats_line_y    = L->stats_wall_y + box.wall_h + L->stats_gap_clock;
-        L->stats_heat_y    = L->stats_line_y + box.line_h + L->stats_gap_line;
+        L->stats_y = h - L->pad_y - L->stats_h;
     }
 
     L->hint_y = L->stats_y - L->hint_px * 2.2;
@@ -228,13 +224,17 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
 
     /* 窗口太矮 / 太窄：整块等比缩小*/
     need   = L->card_pad * 2.0 + L->cover_px + cover_gap + L->bar_h
-           + h * GAP_CARD_TITLE + L->title_px * LINE_HEIGHT + title_gap
+           + h * GAP_CARD_TITLE + L->title_px * LINE_HEIGHT * TITLE_LINES + title_gap
            + L->qr_px + (n_qr > 0 ? qr_gap + L->badge_h : 0.0);
     budget = h - 2.0 * L->pad_y;
 
-    /* 窄窗口两栏会撞在一起：这时右列只能占到统计卡片上方 */
-    if (w * COL_CENTER - L->cover_px * 0.5 < L->pad_x * 2.0 + L->stats_w)
-        budget = MIN(budget, L->stats_y - L->pad_y * 2.0);
+    /* 窄窗口两列会挤在一起：此时封面列只能占到统计卡片上方 */
+    {
+        const double rail_min = MAX(360.0, w * 0.34);
+
+        if (L->pad_x + L->col_w + L->pad_x * 0.6 + rail_min > w - L->pad_x)
+            budget = MIN(budget, L->stats_y - L->pad_y * 2.0);
+    }
 
     if (need > budget && need > 0.0) {
         double k = MAX(0.25, budget / need);
@@ -270,28 +270,42 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
 
     L->badge_w = n_qr > 0 ? MIN(L->cell_w * 1.35, L->col_w / (double)n_qr) : 0.0;
 
-    L->col_cx = clampd(w * COL_CENTER,
-                       L->pad_x + L->col_w * 0.5,
-                       w - L->pad_x - L->col_w * 0.5);
+    /* 封面 / 二维码列贴在左内边距上 */
+    L->col_x  = L->pad_x;
+    L->col_cx = L->col_x + L->col_w * 0.5;
 
     /* 右列 */
     L->cover_card_y = L->pad_y;
     L->cover_y      = L->cover_card_y + L->card_pad;
-    L->bar_x        = L->col_cx - L->cover_px * 0.5;
+    L->bar_x        = L->col_x + L->card_pad;
     L->bar_y        = L->cover_y + L->cover_px + cover_gap;
     L->bar_w        = L->cover_px;
     L->cover_card_h = L->card_pad * 2.0 + L->cover_px + cover_gap + L->bar_h;
 
+    L->title_x = L->col_x;
     L->title_y = L->cover_card_y + L->cover_card_h + h * GAP_CARD_TITLE;
-    L->title_w = MIN(w * 0.42, L->col_w * 1.75);
-    L->qr_y    = L->title_y + L->title_px * LINE_HEIGHT + title_gap;
+    L->qr_y    = L->title_y + L->title_px * LINE_HEIGHT * TITLE_LINES + title_gap;
     L->badge_y = L->qr_y + L->qr_px + qr_gap;
 
-    /* 左列：备注 / 大时钟 / 歌词 */
-    L->left_x = L->pad_x;
+    /* 文本栏：备注 / 大时钟 / 歌词，位于封面列右侧并延伸至右内边距。
+     * 与封面列之间留出明显间距（GUTTER_TEXT / 窗口比例）。 */
+    {
+        double gutter = MAX(L->pad_x * GUTTER_TEXT, w * 0.05);
 
-    /* 时钟最多占到右列左边，留一点呼吸空隙 */
-    L->left_w = MAX(140.0, (L->col_cx - L->col_w * 0.5) - L->pad_x * 1.6);
+        L->left_x = (L->col_x + L->col_w) + gutter;
+    }
+    L->left_w = MAX(140.0, (w - L->pad_x) - L->left_x);
+
+    /* 标题左对齐在封面列内，两行可换行，宽度不越过文本栏 */
+    L->title_w = MAX(160.0, (L->left_x - L->pad_x * 0.6) - L->col_x);
+
+    /* 统计卡片与文本栏左对齐（尺寸已在前面算好） */
+    L->stats_x         = L->left_x;
+    L->stats_content_x = L->stats_x + pad_h;
+    L->stats_content_w = MAX(L->stats_w - pad_h * 2.0, 1.0);
+    L->stats_wall_y    = L->stats_y + pad_v;
+    L->stats_line_y    = L->stats_wall_y + box.wall_h + L->stats_gap_clock;
+    L->stats_heat_y    = L->stats_line_y + box.line_h + L->stats_gap_line;
 
     L->note_y = L->pad_y;
 
@@ -326,7 +340,8 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                           L->hint_y - h * GAP_LYRIC_HINT);
     L->lyric_area_h = L->lyric_bottom - L->lyric_y;
 
-    /* 歌词列宽：时钟宽度的 LYRIC_W_GROW 倍（不超过左列可用宽度）。
-     * 比时钟略宽可以让长句少折行，居中排版时两侧留白也更均匀。 */
-    L->lyric_w = MIN(L->left_w, L->clock_w * LYRIC_W_GROW);
+    /* 歌词列宽：至少为时钟宽度的 LYRIC_W_GROW 倍，并保证可读行长
+     * （窗口宽度的 LYRIC_W_MIN），上限为文本栏可用宽度。 */
+    L->lyric_w = MIN(L->left_w, MAX(L->clock_w * LYRIC_W_GROW, w * LYRIC_W_MIN));
+
 }

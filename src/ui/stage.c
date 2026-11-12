@@ -232,7 +232,7 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
     if (lyricgl_ready()) {
         LyricViewGeom geom;
 
-        geom.x      = L->pad_x;
+        geom.x      = L->left_x;
         geom.w      = L->lyric_w;
         geom.top    = L->lyric_y;
         geom.height = L->lyric_area_h;
@@ -268,14 +268,14 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
 
         /* 只在歌词区域里画：不会渗到下面的提示行 / 统计卡片里 */
         cairo_save(cr);
-        cairo_rectangle(cr, L->pad_x, L->lyric_y, L->lyric_w, L->lyric_area_h);
+        cairo_rectangle(cr, L->left_x, L->lyric_y, L->lyric_w, L->lyric_area_h);
         cairo_clip(cr);
 
         if (app.lyric_prev != NULL && *app.lyric_prev != '\0' && t < 1.0) {
             TextStyle out = cur;
 
             out.color.a = 0.96 * (1.0 - t);
-            text_draw_block(cr, app.lyric_prev, &out, L->pad_x, y - rise * t,
+            text_draw_block(cr, app.lyric_prev, &out, L->left_x, y - rise * t,
                             TEXT_LEFT, L->lyric_w, 0);
             drew = TRUE;
         }
@@ -284,7 +284,7 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
             if (t < 1.0)
                 cur.color.a *= t;
 
-            y += text_draw_block(cr, app.lyric_line, &cur, L->pad_x, y,
+            y += text_draw_block(cr, app.lyric_line, &cur, L->left_x, y,
                                  TEXT_LEFT, L->lyric_w, 0);
             drew = TRUE;
         }
@@ -298,7 +298,7 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
                 if (has_cur)
                     y += L->lyric_gap;
 
-                text_draw_block(cr, app.lyric_next, &ahead, L->pad_x, y,
+                text_draw_block(cr, app.lyric_next, &ahead, L->left_x, y,
                                 TEXT_LEFT, L->lyric_w, 0);
             }
 
@@ -321,12 +321,12 @@ static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
     if (note != NULL) {
         style = TEXT_STYLE(FONT_MONO, L->note_px, PANGO_WEIGHT_NORMAL,
                            L->note_px * 0.16, WHITE(0.50));
-        text_draw(cr, note, &style, L->pad_x, L->note_y, TEXT_LEFT, L->left_w);
+        text_draw(cr, note, &style, L->left_x, L->note_y, TEXT_LEFT, L->left_w);
     }
 
     /* 大时钟 */
     style = TEXT_STYLE(FONT_HAND, L->clock_px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
-    text_draw(cr, clock_text, &style, L->pad_x, L->clock_y, TEXT_LEFT, 0.0);
+    text_draw(cr, clock_text, &style, L->left_x, L->clock_y, TEXT_LEFT, 0.0);
 
     /* 歌词 / 状态：有错误或加载中就先报状态，否则画歌词 */
     {
@@ -337,7 +337,7 @@ static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
             style = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_NORMAL,
                                L->lyric_px * 0.10, color);
             /* 和歌词同一套左对齐锚点；放不下就省略号（只占一行） */
-            text_draw_block(cr, line, &style, L->pad_x, L->lyric_y,
+            text_draw_block(cr, line, &style, L->left_x, L->lyric_y,
                             TEXT_LEFT, L->lyric_w, 1);
             if (lyricgl_ready())
                 lyricgl_clear();
@@ -373,7 +373,7 @@ static void draw_hint(cairo_t *cr, const Layout *L)
 
     style = TEXT_STYLE(FONT_MONO, L->hint_px, PANGO_WEIGHT_NORMAL,
                        L->hint_px * 0.14, col_hint);
-    text_draw(cr, mode->str, &style, L->pad_x, L->hint_y, TEXT_LEFT, L->left_w);
+    text_draw(cr, mode->str, &style, L->left_x, L->hint_y, TEXT_LEFT, L->left_w);
 
     g_string_free(mode, TRUE);
 }
@@ -385,7 +385,7 @@ static void draw_right(cairo_t *cr, const Layout *L)
     const double position = media_position(&app.media);
     const double duration = media_duration(&app.media);
     g_autofree gchar *label = player_label();
-    double card_x = L->col_cx - (L->cover_px + L->card_pad * 2.0) * 0.5;
+    double card_x = L->col_x;
 
     /* 封面和进度条装在同一个衬底里 */
     card_draw(cr, card_x, L->cover_card_y, L->cover_px + L->card_pad * 2.0,
@@ -413,7 +413,8 @@ static void draw_right(cairo_t *cr, const Layout *L)
         TextStyle         style = TEXT_STYLE(FONT_MONO, L->title_px, PANGO_WEIGHT_NORMAL,
                                             L->title_px * 0.05, col_text);
 
-        text_draw(cr, title, &style, L->col_cx, L->title_y, TEXT_CENTER, L->title_w);
+        text_draw_block(cr, title, &style, L->title_x, L->title_y,
+                        TEXT_LEFT, L->title_w, TITLE_LINES);
     }
 
     qrcard_draw(cr, L);

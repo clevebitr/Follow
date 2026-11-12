@@ -14,5 +14,5 @@ auto-breakpoint: false
 
 ## Current
 
-goal: 歌词动效统一 + 拖动跟手
-breakpoint: 拖动已加：FBO 取整 + 拖动暂停动画 + 几何抖动抑制；等实测拖动手感
+goal: 歌词居中排版（已推送）
+breakpoint: 已推送 82d4a13（居中+列宽）；等确认对齐观感

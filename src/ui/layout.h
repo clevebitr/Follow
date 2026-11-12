@@ -18,7 +18,7 @@ typedef struct {
     double pad_x, pad_y;
 
     /* 左列：备注 / 大时钟 / 歌词 */
-    double left_x;
+    double left_x;              /* 文本栏左边界（备注 / 时钟 / 歌词 / 统计） */
     double left_w;
     double note_px, note_y;
     double clock_px, clock_y, clock_w, clock_h;
@@ -31,11 +31,11 @@ typedef struct {
     double hint_px, hint_y;     /* SHUFFLE / REPEAT / LRC 偏移 */
 
     /* 右列：封面 + 进度条 / 曲名 / 二维码 + 胶囊 */
-    double col_cx, col_w;
+    double col_x, col_cx, col_w;   /* 封面列左边界 / 中心 / 宽度 */
     double card_pad, card_radius;
     double cover_px, cover_y, cover_card_y, cover_card_h;
     double bar_x, bar_y, bar_w, bar_h;
-    double title_px, title_y, title_w;
+    double title_px, title_x, title_y, title_w;
     double qr_px, qr_y, cell_w, cell_gap;
     double badge_h, badge_y, badge_w;
 
@@ -58,7 +58,9 @@ typedef struct {
 #define LYRIC_SLOT_ROWS 2
 #define LYRIC_ROW_EM    1.30    /* 单行文字行高与字号之比 */
 #define LYRIC_CLOCK_MIN 0.85    /* 为歌词区让位时时钟的最小缩放比例 */
-#define LYRIC_W_GROW    1.20    /* 歌词列宽 / 时钟宽度 */
+#define LYRIC_W_GROW    1.20    /* 歌词列宽至少为时钟宽度的该倍数 */
+#define LYRIC_W_MIN     0.46    /* 歌词列宽至少为窗口宽度的该比例 */
+#define TITLE_LINES     2       /* 曲名最多换几行（封面列宽度有限） */
 
 /* 歌词槽高度（逻辑像素） */
 double lyric_slot_h(double px);

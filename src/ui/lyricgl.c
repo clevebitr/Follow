@@ -82,6 +82,11 @@
 /* 区域底部渐隐的高度 / 字号 */
 #define EDGE_FADE_EM      0.7
 
+/* 歌词水平对齐：1 = 左对齐（字头固定，配合逐字扫描最稳），
+ * 2 = 右对齐（折行两行共用右边缘），0 = 居中（两侧留白均匀）。
+ * 缩放基准跟随对齐边：左对齐取左边界、右对齐取右边界、居中取中心。 */
+#define ALIGN_MODE        1
+
 /* 行号跳转超过此值时不做弹簧过渡 */
 #define SNAP_JUMP         3
 
@@ -608,6 +613,24 @@ static Slot *slot_get(const gchar *text, double px_dev, double weight,
 
 /* ---------------- 绘制 ---------------- */
 
+/* 按对齐方式求文字块左边界的设备像素坐标；返回同时给出缩放基准点 */
+static double align_left(double col_x, double col_w, double text_w, double *origin)
+{
+#if ALIGN_MODE == 1
+    (void)col_w;
+    (void)text_w;
+
+    *origin = col_x;
+    return col_x;
+#elif ALIGN_MODE == 2
+    *origin = col_x + col_w;
+    return col_x + col_w - text_w;
+#else
+    *origin = col_x + col_w * 0.5;
+    return col_x + (col_w - text_w) * 0.5;
+#endif
+}
+
 static Rgba mix_color(Rgba a, Rgba b, double t)
 {
     t = CLAMP(t, 0.0, 1.0);
@@ -658,6 +681,7 @@ static void report_lines(void)
         for (int r = 0; r < l->n_rows; r++) {
             const Row *row = &l->rows[r];
             double     y   = l->y + row->dy;
+            double     unused_x = 0.0;
 
             if (row->text == NULL)
                 continue;
@@ -671,7 +695,8 @@ static void report_lines(void)
                 Rgba c = l->col;
 
                 c.a = CLAMP(l->alpha, 0.0, 1.0);
-                uidbg_record_text(g_geom.x + MAX(0.0, (g_geom.w - row->w) * 0.5),
+                uidbg_record_text(align_left(g_geom.x, g_geom.w,
+                                             MIN(row->w, g_geom.w), &unused_x),
                                   y, MIN(row->w, g_geom.w), row->h,
                                   l->lay_px > 0.0 ? l->lay_px : g_geom.px,
                                   c, row->text);
@@ -968,13 +993,13 @@ static void draw_row(Line *line, const Row *row)
     if (slot == NULL || slot->tex == 0)
         return;
 
-    /* 水平居中：文字块在歌词列内居中，缩放基准取文字水平中心 */
+    /* 水平对齐（见 ALIGN_MODE）：缩放基准跟随对齐边，放大时不会偏离锚点 */
     {
         double text_w = (double)slot->w - (double)slot->pad * 2.0;
-        double left   = x_dev + (g_geom.w * (double)g_scale - text_w) * 0.5;
+        double left   = align_left(x_dev, g_geom.w * (double)g_scale, text_w,
+                                   &q.ox);
 
-        q.x  = left - (double)slot->pad;
-        q.ox = left + text_w * 0.5;
+        q.x = left - (double)slot->pad;
     }
 
     q.y  = y_dev - (double)slot->pad;
