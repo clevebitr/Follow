@@ -33,6 +33,8 @@ typedef enum {
     KEY_SEEK_FORWARD,
     KEY_NEXT,
     KEY_PREV,
+    KEY_QUEUE_PREV,
+    KEY_QUEUE_NEXT,
     KEY_RESTART,
     KEY_STOP,
     KEY_REPEAT,

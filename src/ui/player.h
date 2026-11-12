@@ -25,6 +25,12 @@ gboolean player_play_first(void);
 /* dir = +1 下一首 / -1 上一首（随机模式下走历史） */
 void player_play_neighbour(gint dir);
 
+/* NEXT 预告：将要播放的曲目下标（无覆盖时按当前模式推算），-1 = 无 */
+gint player_queue_preview(void);
+
+/* 在列表里前后移动 NEXT 预告；回到自动顺序时清除覆盖 */
+void player_queue_step(gint dir);
+
 void player_toggle(void);        /* Space：播放 / 暂停 / 继续 / 从头开始 */
 void player_restart(void);       /* R */
 void player_stop(void);          /* S */

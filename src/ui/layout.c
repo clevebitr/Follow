@@ -31,6 +31,10 @@
 #define GAP_LYRIC_HINT  0.012   /* 歌词区下沿 -> 提示行 / h */
 #define GAP_COVER_BAR   0.005   /* 进度条离封面底部 5px（1080p） */
 #define GAP_CARD_TITLE  0.045
+#define NEXT_H          0.072   /* NEXT 卡片高度 / h */
+#define NEXT_GAP        0.020   /* NEXT 小标题 -> 卡片 / h */
+#define SHIFT_X         0.021   /* 两列整体右移 / w */
+#define STATS_LIFT      0.035   /* 统计块相对底边内边距再上抬 / h */
 #define GAP_TITLE_QR    0.022
 #define GAP_QR_BADGE    0.045
 
@@ -165,6 +169,8 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     L->title_px       = clampd(h * TITLE_PX, 10.0, 44.0);
     L->stats_clock_px = clampd(h * 0.046, 12.0, 48.0);
     L->stats_px       = clampd(h * 0.019, 8.0, 18.0);
+    L->next_px        = clampd(h * 0.016, 10.0, 20.0);
+    L->next_h         = clampd(h * NEXT_H, 46.0, 88.0);
 
     /* 统计块（无卡片衬底）：热力图贴在文字左侧，两者等高 */
     L->stats_gap_clock = h * STATS_GAP_CLOCK;
@@ -191,7 +197,7 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
         box        = stats_measure(cr, L, stats_wall, stats_line);
         L->stats_w = box.w;
         L->stats_h = box.h;
-        L->stats_y = h - L->pad_y - L->stats_h;
+        L->stats_y = h - L->pad_y - h * STATS_LIFT - L->stats_h;
     }
 
     L->hint_y = L->stats_y - L->hint_px * 2.2;
@@ -209,6 +215,7 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     /* 窗口太矮 / 太窄：整块等比缩小*/
     need   = L->card_pad * 2.0 + L->cover_px + cover_gap + L->bar_h
            + h * GAP_CARD_TITLE + L->title_px * LINE_HEIGHT * TITLE_LINES + title_gap
+           + NEXT_GAP * h + L->next_px * LINE_HEIGHT + L->next_h
            + L->qr_px + (n_qr > 0 ? qr_gap + L->badge_h : 0.0);
     budget = h - 2.0 * L->pad_y;
 
@@ -226,6 +233,8 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
         L->card_pad *= k;
         L->cover_px *= k;
         L->title_px *= k;
+        L->next_px  *= k;
+        L->next_h   *= k;
         L->qr_px    *= k;
         L->badge_h  *= k;
         cover_gap   *= k;
@@ -254,8 +263,8 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
 
     L->badge_w = n_qr > 0 ? MIN(L->cell_w * 1.35, L->col_w / (double)n_qr) : 0.0;
 
-    /* 封面 / 二维码列贴在左内边距上 */
-    L->col_x  = L->pad_x;
+    /* 封面 / 二维码列：整体右移 SHIFT_X（右栏随之移动，取得视觉对称） */
+    L->col_x  = L->pad_x + w * SHIFT_X;
     L->col_cx = L->col_x + L->col_w * 0.5;
 
     /* 右列 */
@@ -267,7 +276,12 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     L->cover_card_h = L->card_pad * 2.0 + L->cover_px + cover_gap + L->bar_h;
 
     L->title_y = L->cover_card_y + L->cover_card_h + h * GAP_CARD_TITLE;
-    L->qr_y    = L->title_y + L->title_px * LINE_HEIGHT * TITLE_LINES + title_gap;
+    /* 二维码紧跟曲名；NEXT 卡片落在封面列最底部，底边与统计块底边齐平 */
+    L->qr_y      = L->title_y + L->title_px * LINE_HEIGHT * TITLE_LINES + title_gap;
+    L->next_y    = L->stats_y + L->stats_h - L->next_h;
+    L->next_label_y = L->next_y - L->next_px * LINE_HEIGHT - h * NEXT_GAP;
+    L->next_w    = L->col_w;
+    L->next_x    = L->col_cx - L->next_w * 0.5;
     L->badge_y = L->qr_y + L->qr_px + qr_gap;
 
     /* 文本栏：备注 / 大时钟 / 歌词，位于封面列右侧并延伸至右内边距。
@@ -279,20 +293,19 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
     }
     L->left_w = MAX(140.0, (w - L->pad_x) - L->left_x);
 
-    /* 曲名与封面同轴居中，宽度不越过文本栏；过宽时整体右移避免越出左边距 */
-    L->title_w = MAX(160.0, (L->left_x - L->pad_x * 0.6) - L->col_x);
-    L->title_x = clampd(L->col_cx, L->pad_x + L->title_w * 0.5,
-                        L->left_x - L->pad_x * 0.6 - L->title_w * 0.5);
+    /* 曲名与封面同轴居中：宽度取封面列宽（= 两码总宽），超出则换行 */
+    L->title_w = L->col_w;
+    L->title_x = L->col_cx;
 
     /* 统计块：与文本栏左对齐，热力图在左、文字在右，两者等高 */
     L->stats_x      = L->left_x;
-    L->stats_y      = h - L->pad_y - L->stats_h;
     L->stats_w      = box.w;
     L->stats_heat_x = L->stats_x;
     L->stats_heat_y = L->stats_y;
     L->stats_text_x = L->stats_x + (box.w - box.text_w);
     L->stats_wall_y = L->stats_y;
     L->stats_line_y = L->stats_y + box.wall_h + L->stats_gap_clock;
+
 
     L->note_y = L->pad_y;
 

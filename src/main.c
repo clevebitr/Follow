@@ -546,6 +546,14 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         player_play_neighbour(-1);
         return TRUE;
     }
+    if (keymap_match(KEY_QUEUE_PREV, keyval, state)) {
+        player_queue_step(-1);
+        return TRUE;
+    }
+    if (keymap_match(KEY_QUEUE_NEXT, keyval, state)) {
+        player_queue_step(+1);
+        return TRUE;
+    }
     if (keymap_match(KEY_RESTART, keyval, state)) {
         player_restart();
         return TRUE;
@@ -1177,6 +1185,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     }
 
     app.track        = -1;
+    app.queue_next   = -1;
     app.shown_second = -1;
     app.repeat       = cfg->repeat;
     app.shuffle      = cfg->shuffle;

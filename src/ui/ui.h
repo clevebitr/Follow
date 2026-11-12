@@ -62,6 +62,7 @@ typedef struct {
     /* 播放 */
     Media    media;
     gint     track;               /* -1 = 还没有选曲目 */
+    gint     queue_next;          /* NEXT 预告指定曲目；-1 = 跟随机序 */
     gint     repeat;              /* RepeatMode */
     gboolean shuffle;
     gint     history[64];         /* 随机播放历史 */

@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include "cover.h"
+#include "covercache.h"
 #include "help.h"
 #include "layout.h"
 #include "media.h"
@@ -378,6 +379,81 @@ static void draw_hint(cairo_t *cr, const Layout *L)
     g_string_free(mode, TRUE);
 }
 
+/* ---------- NEXT 预告卡片 ---------- */
+
+/* 一张"宽而矮"的小组件卡片：左侧封面缩略图，右侧曲名与艺人。
+ * 后面两张错位的空卡片用来表现"叠放"。 */
+static void draw_next_card(cairo_t *cr, const Layout *L)
+{
+    const APPconfig  *cfg  = config_get();
+    gint              idx  = player_queue_preview();
+    double            pad  = L->next_h * 0.13;
+    double            thumb = L->next_h - pad * 2.0;
+    TextStyle         name, artist;
+    cairo_surface_t  *img = NULL;
+    const AudioTrack *track = NULL;
+
+    if (idx >= 0 && idx < (gint)cfg->n_tracks)
+        track = config_track_at(cfg, (gsize)idx);
+
+    /* 叠放：两张略窄、略高的底卡 */
+    for (int i = 2; i >= 1; i--) {
+        double inset = pad * 0.5 * (double)i;
+        double rise  = pad * 0.55 * (double)i;
+
+        color_set(cr, WHITE(0.05 * (double)(3 - i)));
+        path_round_rect(cr, L->next_x + inset, L->next_y - rise,
+                        L->next_w - inset * 2.0, L->next_h,
+                        L->card_radius * 0.8);
+        cairo_fill(cr);
+    }
+
+    /* 前卡 */
+    card_draw(cr, L->next_x, L->next_y, L->next_w, L->next_h, L->card_radius * 0.8);
+
+    name   = TEXT_STYLE(FONT_MONO, L->next_px, PANGO_WEIGHT_BOLD,
+                        L->next_px * 0.04, WHITE(0.92));
+    artist = TEXT_STYLE(FONT_MONO, L->next_px * 0.78, PANGO_WEIGHT_NORMAL,
+                        L->next_px * 0.10, col_dim);
+
+    if (idx >= 0) {
+        img = covercache_surface((gsize)idx);
+
+        if (img != NULL) {
+            double alpha = 0.35 + 0.65 * covercache_reveal((gsize)idx);
+
+            cairo_save(cr);
+            path_round_rect(cr, L->next_x + pad, L->next_y + pad,
+                            thumb, thumb, thumb * 0.16);
+            cairo_clip(cr);
+            cairo_set_source_surface(cr, img, L->next_x + pad, L->next_y + pad);
+            cairo_paint_with_alpha(cr, alpha);
+            cairo_restore(cr);
+        } else {
+            color_set(cr, WHITE(0.07));
+            path_round_rect(cr, L->next_x + pad, L->next_y + pad,
+                            thumb, thumb, thumb * 0.16);
+            cairo_fill(cr);
+        }
+    }
+
+    {
+        double text_x = L->next_x + pad + thumb + pad * 0.9;
+        double text_w = (L->next_x + L->next_w - pad) - text_x;
+        double line1  = L->next_px * 1.45;
+        double top    = L->next_y + (L->next_h - line1 * 2.0) * 0.5;
+
+        if (track != NULL) {
+            text_draw(cr, track->title != NULL ? track->title : "—", &name,
+                      text_x, top, TEXT_LEFT, text_w);
+            text_draw(cr, track->artist != NULL ? track->artist : "", &artist,
+                      text_x, top + line1, TEXT_LEFT, text_w);
+        } else {
+            text_draw(cr, "—", &name, text_x, top, TEXT_LEFT, text_w);
+        }
+    }
+}
+
 /* ---------- 右列：封面 + 进度条 / ♪ 曲名 ♪ / 二维码 ---------- */
 
 static void draw_right(cairo_t *cr, const Layout *L)
@@ -410,12 +486,33 @@ static void draw_right(cairo_t *cr, const Layout *L)
 
     if (label != NULL) {
         g_autofree gchar *title = g_strdup_printf("♪ %s ♪", label);
-        TextStyle         style = TEXT_STYLE(FONT_MONO, L->title_px, PANGO_WEIGHT_NORMAL,
-                                            L->title_px * 0.05, col_text);
+        double            px    = L->title_px;
+        double            need;
+        TextStyle         style = TEXT_STYLE(FONT_MONO, px, PANGO_WEIGHT_NORMAL,
+                                            px * 0.05, col_text);
+
+        /* 曲名放不进封面列时先缩字号（下限 0.7），尽量保持单行、左右居中 */
+        need = text_width(cr, title, &style);
+
+        if (need > L->title_w && need > 0.0) {
+            px    = px * MAX(0.7, L->title_w / need);
+            style = (TextStyle)TEXT_STYLE(FONT_MONO, px, PANGO_WEIGHT_NORMAL,
+                                          px * 0.05, col_text);
+        }
 
         text_draw_block(cr, title, &style, L->title_x, L->title_y,
                         TEXT_CENTER, L->title_w, TITLE_LINES);
     }
+
+    /* NEXT 预告：小标题 + 叠放卡片 */
+    {
+        TextStyle tag = TEXT_STYLE(FONT_MONO, L->next_px * 0.72, PANGO_WEIGHT_NORMAL,
+                                  L->next_px * 0.24, col_dim);
+
+        text_draw(cr, "NEXT", &tag, L->next_x, L->next_label_y, TEXT_LEFT, L->next_w);
+    }
+
+    draw_next_card(cr, L);
 
     qrcard_draw(cr, L);
 }

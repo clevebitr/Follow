@@ -248,6 +248,56 @@ static gboolean play_random(void)
     return FALSE;
 }
 
+/* 自动顺序下的下一首（不考虑随机 / 停机），用于 NEXT 预告的默认值 */
+static gint natural_next(void)
+{
+    gint n = (gint)config_get()->n_tracks;
+
+    if (n <= 0 || app.track < 0)
+        return -1;
+
+    return (app.track + 1) % n;
+}
+
+gint player_queue_preview(void)
+{
+    gint n = (gint)config_get()->n_tracks;
+
+    if (n <= 0)
+        return -1;
+
+    if (app.queue_next >= 0 && app.queue_next < n)
+        return app.queue_next;
+
+    return natural_next();
+}
+
+void player_queue_step(gint dir)
+{
+    gint n  = (gint)config_get()->n_tracks;
+    gint at = player_queue_preview();
+
+    if (n <= 0 || at < 0 || dir == 0)
+        return;
+
+    at = (at + dir) % n;
+
+    if (at < 0)
+        at += n;
+
+    /* 转回自动顺序的那一首时取消覆盖 */
+    app.queue_next = (at == natural_next()) ? -1 : at;
+
+    {
+        const AudioTrack *t = app.queue_next >= 0
+            ? config_track_at(config_get(), (gsize)app.queue_next) : NULL;
+
+        g_message("queue: next -> %s", t != NULL && t->title != NULL
+                  ? t->title : "auto");
+    }
+    ui_request_redraw();
+}
+
 void player_play_neighbour(gint dir)
 {
     gint n     = (gint)config_get()->n_tracks;
@@ -421,6 +471,16 @@ void player_check_finished(void)
 
     /* 先把这个事件消费掉：下一首要走解析/下载，期间 state 还是上一首的 */
     media_ack_finished(&app.media);
+
+    /* NEXT 预告被显式指定过：优先播它，然后回到自动顺序 */
+    if (app.queue_next >= 0) {
+        gint idx = app.queue_next;
+
+        app.queue_next = -1;
+
+        if (player_play_index(idx))
+            return;
+    }
 
     if (app.repeat == REPEAT_ONE) {
         if (app.media.has_stream) {

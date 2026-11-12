@@ -27,6 +27,8 @@ void help_draw(cairo_t *cr, double width, double height)
         { KEY_SEEK_FORWARD, "前进 5 秒（按住 Shift = 30 秒）" },
         { KEY_NEXT,         "下一首" },
         { KEY_PREV,         "上一首" },
+        { KEY_QUEUE_PREV,   "NEXT 预告：往前一首" },
+        { KEY_QUEUE_NEXT,   "NEXT 预告：往后一首" },
         { KEY_RESTART,      "从头重放当前曲目" },
         { KEY_STOP,         "停止" },
         { KEY_REPEAT,       "循环：关 → 列表 → 单曲" },

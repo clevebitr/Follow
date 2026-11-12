@@ -36,8 +36,13 @@ typedef struct {
     double cover_px, cover_y, cover_card_y, cover_card_h;
     double bar_x, bar_y, bar_w, bar_h;
     double title_px, title_x, title_y, title_w;
+    double next_px;                                        /* NEXT 卡片文字字号 */
     double qr_px, qr_y, cell_w, cell_gap;
     double badge_h, badge_y, badge_w;
+
+    /* NEXT 预告（叠放卡片）：位于曲名与二维码之间 */
+    double next_x, next_y, next_w, next_h;
+    double next_label_y;                                   /* "NEXT" 小标题上沿 */
 
     /* 统计块（无衬底）：左侧热力图 + 右侧墙钟 / 收听时长 */
     double stats_x, stats_y, stats_w, stats_h;          /* 整块外框 */
