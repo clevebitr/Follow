@@ -16,6 +16,7 @@
 #include <gtk/gtk.h>
 
 #include "cache.h"
+#include "lyricgl.h"
 #include "lyrics.h"
 #include "lyricsrc.h"
 #include "ui.h"
@@ -355,9 +356,15 @@ void lyricview_sync(double position_sec)
         } else if (app.lyric_prev != NULL && strcmp(app.lyric_line, app.lyric_prev) == 0) {
             /* 同一句重复（副歌）：画面本来就不用动 */
             fx_stop(&app.fx_lyric);
-        } else {
+        } else if (!lyricgl_ready()) {
+            /* 只有 cairo 回退路径会用这个过渡（fx_t() 在那里推进）；
+             * GPU 歌词层自己有一套动效，不许把 fx 拉起来——否则 fx
+             * 永远停在 active（没人调 fx_t），16ms 动画泵会一直重画整块
+             * 主画布，帧率被白日在 cairo 上吃掉。 */
             fx_begin(&app.fx_lyric, LYRIC_FADE_SEC);
             ui_animate();
+        } else {
+            fx_stop(&app.fx_lyric);
         }
 
         changed = TRUE;

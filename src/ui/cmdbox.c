@@ -13,6 +13,7 @@
 #include "config.h"
 #include "lyricview.h"
 #include "media.h"
+#include "perf.h"
 #include "player.h"
 #include "playlist.h"
 #include "settings.h"
@@ -32,6 +33,7 @@ typedef enum {
     ACT_WALL,
     ACT_HELP,
     ACT_FULLSCREEN,
+    ACT_PERF,
     ACT_QUIT,
     ACT_VOLUME_UP,
     ACT_VOLUME_DOWN,
@@ -259,6 +261,7 @@ static void palette_show_root(gboolean clear_query)
     add_item("Reset lyric offset", lrc, ACT_LYRIC_RESET, NULL);
     add_item("Toggle song wall", NULL, ACT_WALL, NULL);
     add_item("Toggle help", NULL, ACT_HELP, NULL);
+    add_item("Toggle perf overlay", perf_visible() ? "on" : "off", ACT_PERF, NULL);
     add_item("Toggle fullscreen", NULL, ACT_FULLSCREEN, NULL);
     add_item("Quit", "关闭 Follow", ACT_QUIT, NULL);
     rebuild_rows();
@@ -436,6 +439,10 @@ static void run_item(PaletteItem *item)
     case ACT_FULLSCREEN:
         palette_close();
         ui_toggle_fullscreen();
+        break;
+    case ACT_PERF:
+        palette_close();
+        perf_toggle();
         break;
     case ACT_QUIT:
         palette_close();

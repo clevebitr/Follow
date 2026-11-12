@@ -81,6 +81,9 @@ static const struct {
     { "cancel",       KEY_BACK },
     { "quit",         KEY_QUIT },
     { "exit",         KEY_QUIT },
+    { "perf",         KEY_PERF },
+    { "performance",  KEY_PERF },
+    { "fps",          KEY_PERF },
 };
 
 /* 没写 [keys] 时的默认值，和 README / config.ini 保持一致 */
@@ -104,6 +107,7 @@ static const gchar *g_defaults[KEY_ACTION_COUNT] = {
     [KEY_PLAYLIST]     = "Tab",
     [KEY_BACK]         = "Escape",
     [KEY_QUIT]         = "q",
+    [KEY_PERF]         = "F12",
 };
 
 gint keymap_action_from_name(const gchar *name)

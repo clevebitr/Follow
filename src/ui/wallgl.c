@@ -17,6 +17,7 @@
 
 #include "covercache.h"
 #include "glutil.h"
+#include "perf.h"
 #include "playlist.h"
 
 /* 一块单位四边形，用 uniform 的 u_rect 摆到屏幕坐标。 */
@@ -531,6 +532,8 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     if (!ensure_resources() || w <= 0 || h <= 0)
         return TRUE;
 
+    perf_phase_begin(PERF_PHASE_WALL);
+
     scale = gl_util_viewport(GTK_WIDGET(area));
 
     if (g_getenv("FOLLOW_WALL_DEBUG") != NULL)
@@ -549,6 +552,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     if (!g_active) {
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+        perf_phase_end(PERF_PHASE_WALL);
         return TRUE;
     }
 
@@ -582,6 +586,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
         }
     }
 
+    perf_phase_end(PERF_PHASE_WALL);
     return TRUE;
 }
 

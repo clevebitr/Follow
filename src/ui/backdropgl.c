@@ -17,6 +17,7 @@
 
 #include "backdrop.h"
 #include "glutil.h"
+#include "perf.h"
 #include "playlist.h"
 #include "viz.h"
 
@@ -391,6 +392,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
         return TRUE;
     }
 
+    perf_phase_begin(PERF_PHASE_BACKDROP_GL);
     gl_util_viewport(widget);
 
     glDisable(GL_DEPTH_TEST);
@@ -407,6 +409,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     draw_particles(f, (double)w, (double)h);
     draw_scrim();
 
+    perf_phase_end(PERF_PHASE_BACKDROP_GL);
     return TRUE;
 }
 

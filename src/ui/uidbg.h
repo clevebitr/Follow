@@ -27,6 +27,7 @@ enum {
     UIDBG_LAYER_STAGE,        /* 主画面 */
     UIDBG_LAYER_LYRIC,        /* 歌词（GPU 层，单独标出来） */
     UIDBG_LAYER_PALETTE,      /* 命令面板（cairo 部分） */
+    UIDBG_LAYER_PERF,         /* 性能检测层（perf.c 的读数） */
     UIDBG_LAYER_MAX
 };
 

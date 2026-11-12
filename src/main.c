@@ -52,6 +52,7 @@
 #include "lyricview.h"
 #include "media.h"
 #include "cmdbox.h"
+#include "perf.h"
 #include "player.h"
 #include "playlist.h"
 #include "qrcard.h"
@@ -422,6 +423,12 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)controller;
     (void)keycode;
     (void)data;
+
+    /* 性能检测层在任何页面都能开关（包括帮助页 / 歌曲墙） */
+    if (keymap_match(KEY_PERF, keyval, state)) {
+        perf_toggle();
+        return TRUE;
+    }
 
     {
         const gboolean ctrl_shift_p =
@@ -1128,6 +1135,10 @@ static void activate(GtkApplication *app_, gpointer user_data)
     /* 命令面板放最上层，右下角；列表在输入框上方，向上展开。 */
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), palette_new());
 
+    /* 性能检测层：F12 开关，叠在最上面（can_target = FALSE，不吃鼠标） */
+    app.perf = perf_new(window);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.perf);
+
     {
         GtkWidget *root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
         GtkWidget *handle   = gtk_window_handle_new();
@@ -1347,6 +1358,7 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
 
     g_clear_pointer(&app.snapshot, cairo_surface_destroy);
 
+    perf_clear();
     uidbg_stop();
 
     stats_save(&app.stats);

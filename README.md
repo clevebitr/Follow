@@ -82,9 +82,16 @@
   加色 sprite 里画；GL 失败或 `FOLLOW_BACKDROPGL=0` 时退回原来的 CPU 小纹理 + `GtkPicture`。
 - 封面解码、磁贴纹理生成都放到后台线程 / 低优先级队列；2K / 4K 上磁贴按设备像素渲染，
   打开墙不再同步卡住，快速拖动也不会临时排 Pango。
+- **主画布只在内容变化时重画**：歌词在 GPU 层逐字推进时，主画布（时钟 / 封面 / 统计）
+  不再被每帧重新记录一遍；实测播歌从 ~34fps 回到 ~50fps 以上，CPU 占用减半。
 - Windows 下窗口不再用 CSD 的 12px 阴影（DComp 会把透明阴影区画成黑边）：改成 1px 细边，
   标题栏放在内容顶部用 `GtkWindowHandle` 拖动，四边有自定义缩放；DWM 的圆角 / 边框也关掉。
 - `FOLLOW_WALL_DEBUG=1` 会打印墙的帧率 / 帧时间 / 纹理上传数。
+- **性能检测层**：按 `F12`（或命令面板里的 `Toggle perf overlay`）在左上角叠一块
+  检测面板，实时显示合成帧率 / 帧间隔（avg · p95 · 最慢）/ 各渲染层的 CPU 耗时与
+  每秒调用次数 / 纹理上传量。帧时间取自窗口的 `GdkFrameClock::after-paint`，
+  是「真的合成了一帧」的时刻，而不是主画布的重画间隔。
+- `FOLLOW_PERF=1` 启动时就打开检测层（做回归测试 / 截帧时方便）。
 
 > 开发调试：`FOLLOW_WALL_AUTO=1` 启动后自动开墙，`FOLLOW_EXIT_MS=8000` 定时退出，
 > `FOLLOW_WALL_AUTO_PAN=1` 持续平移，`FOLLOW_WALL_AUTO_CLOSE` / `FOLLOW_WALL_AUTO_REOPEN`
@@ -134,6 +141,7 @@
 | `F` / `F11` | 全屏（没有标题栏，就是参考布局那个观感） |
 | `Tab` | 打开 / 关闭歌曲墙 |
 | `F1` | 快捷键页 |
+| `F12` | 性能检测层（帧率 / 帧时间 / 各层耗时） |
 | `Q` | 退出 |
 | `Esc` | 关掉歌曲墙 / 快捷键页 / 退出全屏 |
 
@@ -212,6 +220,7 @@ help=F1
 playlist=Tab
 back=Escape
 quit=q                            # off / none 表示解绑
+perf=F12
 
 [audio1]
 link=src/assets/xxx.mp3     # 本地路径或 http(s) URL

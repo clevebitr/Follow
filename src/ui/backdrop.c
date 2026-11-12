@@ -20,6 +20,7 @@
 #include "texture.h"
 #include "theme.h"
 #include "backdropgl.h"
+#include "perf.h"
 #include "playlist.h"
 #include "ui.h"
 #include "viz.h"
@@ -474,6 +475,8 @@ gboolean backdrop_tick(gpointer data)
     if (playlist_is_open() && !playlist_is_closing())
         return G_SOURCE_CONTINUE;
 
+    perf_phase_begin(PERF_PHASE_BACKDROP_CPU);
+
     backdrop_step(BG_FRAME_SEC);
 
     if (backdropgl_ready()) {
@@ -484,6 +487,8 @@ gboolean backdrop_tick(gpointer data)
     } else {
         backdrop_push(width, height);
     }
+
+    perf_phase_end(PERF_PHASE_BACKDROP_CPU);
 
     return G_SOURCE_CONTINUE;
 }

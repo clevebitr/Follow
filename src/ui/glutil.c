@@ -13,6 +13,8 @@
 
 #include <string.h>
 
+#include "perf.h"
+
 static const float QUAD[] = {
     /* x, y, u, v */
     0.0f, 0.0f, 0.0f, 0.0f,
@@ -144,6 +146,8 @@ GLuint gl_util_texture_from_surface(cairo_surface_t *surface)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, data);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+    perf_note_upload((gsize)w * (gsize)h * 4u);
 
     return tex;
 }

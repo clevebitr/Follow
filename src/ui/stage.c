@@ -20,6 +20,7 @@
 #include "layout.h"
 #include "media.h"
 #include "lyricgl.h"
+#include "perf.h"
 #include "player.h"
 #include "playlist.h"
 #include "qrcard.h"
@@ -249,6 +250,9 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
         /* 歌词在 GPU 层画，布局 / 弹簧 / 扫描头都在 lyricgl 里；
          * 它自己会把真实几何报给 uidbg（layer = lyric） */
         lyricgl_set_view(app.lyrics, app.lyric_index, &geom);
+
+        /* cairo 版的淡入淡出用不上了：把 fx 停掉，别让动画泵白空转 */
+        fx_stop(&app.fx_lyric);
 
         uidbg_begin_layer(UIDBG_LAYER_STAGE);
         return TRUE;
@@ -687,6 +691,7 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
     if (width <= 0 || height <= 0)
         return;
 
+    perf_phase_begin(PERF_PHASE_STAGE);
     uidbg_frame_begin();
 
     /* 播放列表是全屏页：盖掉 stage，只留下面那层动态背景 */
@@ -707,6 +712,7 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
         }
 
         uidbg_frame_end();
+        perf_phase_end(PERF_PHASE_STAGE);
         return;
     }
 
@@ -736,6 +742,7 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
         help_draw(cr, (double)width, (double)height);
 
     uidbg_frame_end();
+    perf_phase_end(PERF_PHASE_STAGE);
 }
 
 /* 墙的表头 / 底栏 / 帮助页：画在 GL 层上面的透明画布上，不参与磁贴绘制。 */
@@ -748,6 +755,7 @@ void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     if (width <= 0 || height <= 0 || !playlist_is_open())
         return;
 
+    perf_phase_begin(PERF_PHASE_CHROME);
     uidbg_begin_layer(UIDBG_LAYER_WALL_CHROME);
     uidbg_layer_clear(UIDBG_LAYER_WALL_CHROME);
 
@@ -757,4 +765,6 @@ void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
         uidbg_layer_clear(UIDBG_LAYER_WALL_CHROME);
         help_draw(cr, (double)width, (double)height);
     }
+
+    perf_phase_end(PERF_PHASE_CHROME);
 }

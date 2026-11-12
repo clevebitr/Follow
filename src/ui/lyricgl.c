@@ -17,6 +17,7 @@
 
 #include "glutil.h"
 #include "layout.h"
+#include "perf.h"
 #include "theme.h"
 #include "uidbg.h"
 
@@ -515,6 +516,7 @@ static void upload_r8(GLuint *tex, cairo_surface_t *surface, int w, int h,
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, stride);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    perf_note_upload((gsize)w * (gsize)h);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
@@ -1219,6 +1221,8 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     if (!ensure_resources() || w <= 0 || h <= 0)
         return TRUE;
 
+    perf_phase_begin(PERF_PHASE_LYRIC);
+
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &g_home_fbo);
 
     g_scale  = gl_util_viewport(GTK_WIDGET(area));
@@ -1283,6 +1287,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     glBindFramebuffer(GL_FRAMEBUFFER, g_home_fbo);
 
     report_lines();
+    perf_phase_end(PERF_PHASE_LYRIC);
 
     return TRUE;
 }

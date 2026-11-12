@@ -137,7 +137,8 @@ headerbar windowcontrols button:backdrop > image {
 
 /* 内容层透明： */
 .canvas,
-.bg-picture {
+.bg-picture,
+.perf-overlay {
   background-color: transparent;
   background-image: none;
 }

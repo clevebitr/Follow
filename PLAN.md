@@ -11,8 +11,9 @@ auto-breakpoint: false
 
 - [x] M1 — 2K 60fps：GPU 墙 + GPU 背景（带回退）
 - [x] M2 — 命令面板 / 音量 / 输出设备 / 外框（已完成）
+- [x] M3 — 性能检测层 + 修掉 fx_lyric 常驻重绘（详见 #21）
 
 ## Current
 
-goal: 歌词居中排版（已推送）
-breakpoint: 已推送 82d4a13（居中+列宽）；等确认对齐观感
+goal: 性能检测层（F12）+ fx_lyric 重绘修复
+breakpoint: 已实现并实机验证；待提交，后续优化见 TODO P1

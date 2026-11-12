@@ -42,6 +42,7 @@ typedef struct {
     GtkWidget *lyricgl;     /* 歌词 GPU 层（透明，盖在主画布上） */
     GtkWidget *wallgl;      /* 歌曲墙 GPU 层 */
     GtkWidget *chrome;      /* 歌曲墙表头 / 底栏 / 帮助页（透明层） */
+    GtkWidget *perf;        /* 性能检测层（F12） */
     GtkWidget *bg_picture;
     GtkWidget *bg_gl;       /* 动态背景 GPU 层（失败时回退到 bg_picture） */
     guint      tick_id;

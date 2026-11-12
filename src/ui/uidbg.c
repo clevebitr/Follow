@@ -67,7 +67,7 @@ static guint   g_frame_gap_n;
 static guint   g_frame_gap_i;
 
 static const char *const g_layer_name[UIDBG_LAYER_MAX] = {
-    "wall", "wall-chrome", "stage", "lyric", "palette"
+    "wall", "wall-chrome", "stage", "lyric", "palette", "perf"
 };
 
 static void item_free(Item *it)

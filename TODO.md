@@ -1,6 +1,28 @@
 # TODO
 
-## P0 — 歌词动效（本轮）
+## P0 — 性能检测层（本轮）
+
+- [x] `perf.c` / `perf.h`：左上角性能检测层（F12 / 命令面板 / `FOLLOW_PERF=1`）
+  - [x] 帧率用窗口 `GdkFrameClock::after-paint` 采样（真实合成帧，不是主画布重画间隔）
+  - [x] 面板：帧率 / 帧间隔 avg·p95·最慢 / 帧时间柱状图 / 各层 CPU 耗时与调用频率 / 上传量
+  - [x] 埋点：`perf_phase_begin/end` 接进 stage、chrome、lyricgl、wallgl、backdropgl、backdrop CPU
+- [x] `keymap`: 新增 `KEY_PERF`（默认 `F12`，可在 `[keys] perf` 改）+ 快捷键页行
+- [x] `cmdbox`: `Toggle perf overlay`
+- [x] `uidbg`: 新增 `perf` 层，MCP `ui_screen` 能直接读到面板读数；关面板时清掉
+- [x] 排查出来的主要性能问题并修复：
+  - [x] `fx_lyric` 在 GPU 歌词路径上永远不结束（`fx_t()` 只在 cairo 回退里调）
+    → 16ms 动画泵常驻，整块主画布每帧重画（~6ms × 34fps）
+  - [x] 播歌从 ~34fps / CPU 27% 回到 ~50fps+ / CPU 11%
+- [x] 编译 + 实机验证（stage / 墙 / 帮助页 / 命令面板 / cairo 歌词回退）
+
+## P1 — 待跟进（性能）
+
+- [ ] 主画布一次重画 ~6ms：`theme_text_draw` 每次都重建 PangoLayout，可做 LRU 排版缓存
+  （只在过渡动画的 0.3~0.8s 里明显：那段主画布每秒重画几十次）
+- [ ] 墙打开时空转：`wallgl` 的 tick 回调常驻，静止时也会把 frame clock 拉到显示器刷新率
+  （实测 1920×1080 / 144Hz 空转 137fps）
+
+## P0 — 歌词动效（上一轮）
 
 - [x] `lyrics`: 逐字时间轴
   - [x] 增强 LRC：`[00:12.00]<00:12.00>词<00:12.50>词` → 每个字的绝对时间（`char_ms`）

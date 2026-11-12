@@ -279,3 +279,30 @@ NEXT 标识改为卡片内背景水印（用户建议）：
 
 1) **切换 NEXT 后卡片没有封面**（只有第一张能出）。层层加日志后确认：封面线程早已从磁盘缓存解码完成并 `g_idle_add(covercache_done, job)`，但主线程**永远不执行这个 idle 回调**。原因是 `g_idle_add()` 用 `G_PRIORITY_DEFAULT_IDLE`(200)，而界面在持续 60fps 重绘 + 16/33/100ms 定时器，空闲优先级被无限期压后（第一张之所以能出，是启动瞬间有短暂空档）。改用 `g_idle_add_full(G_PRIORITY_DEFAULT, …)` 后回调 7ms 内执行。**教训：任何从工作线程回到 UI 线程的完成回调都不要用 idle 优先级。**
 2) **胶囊贴卡片**：封面列纵向分配里 `bottom = stats_bottom - next_h - (NEXT_GAP + GAP_BADGE_NEXT)`，新增 `GAP_BADGE_NEXT = 0.032h`（1080p 下约 34px），胶囊整体上移，与卡片间距约 57px；省下的空间仍按原规则在曲名 / 二维码 / 胶囊三处均分。
+
+## 2026-11-12 — 性能检测层（F12）+ 排查到的 fx_lyric 常驻重绘问题
+
+\## 起因
+用户要求排查性能问题并加一个显示运行帧数的性能检测层。
+
+\## 性能检测层（src/ui/perf.c）
+- 帧率口径：窗口 GdkFrameClock 的 after-paint（真正合成一帧的时刻）。uidbg 原来的 fps 是「主画布重画间隔」，播歌时歌词走独立 GLArea，主画布不重画时画面其实还在动，两者不能混用。
+- 面板每 200ms 刷新：fps（最近 2 秒 ≥8 帧才算活跃，否则显示"空闲"）、帧间隔 avg/p95/最慢、CPU 单核占用、帧时间柱状图（60Hz 参考线）、各层 ms/次 + 次/秒（stage / lyric / wall / bg / chrome）、窗口尺寸 / scale / GL 三层状态 / 累计帧数 / 纹理上传 MB/s。
+- 埋点成对 perf_phase_begin/end，接在 stage_render、stage_chrome_render、lyricgl/wallgl/backdropgl 的 on_render、backdrop_tick；纹理上传在 glutil_texture_from_surface 与 lyricgl upload_r8 里计数。
+- F12（keymap KEY_PERF，可改 [keys] perf）；命令面板 Toggle perf overlay；FOLLOW_PERF=1 启动即开。面板不吃鼠标（can_target=FALSE）。
+- 面板读数通过 text_draw 自动记进新的 uidbg 层 "perf"，MCP ui_screen 能直接读到；关面板时清掉这层，避免读到已经不在画面上的文字。
+
+\## 排查结论：fx_lyric 永远 active（已修）
+- 现象：播歌时 ~34fps、CPU 27%，stage_render 6ms 却以 34 次/秒在跑（面板 stage 行 6.4ms 34/s）。
+- 原因：lyricview_sync 换行时 fx_begin(&app.fx_lyric)，但这个 Fx 只有 cairo 回退路径会调 fx_t() 推进；GPU 歌词层下没人调，active 永远为 TRUE。
+  → on_anim_tick 的 lyric_anim 常真 → 每 16ms queue_draw(app.canvas) → 整块 cairo 舞台被重画（GTK 只在有 damage 时才重画，不是每帧；所以这是「自己制造 damage」）。
+- 修法：只有 !lyricgl_ready() 时才 fx_begin（cairo 淡入淡出才需要）；draw_lyrics 的 GPU 分支里再 fx_stop 一次兜底。
+- 结果（1920×1080，144Hz 屏，GskGLRenderer）：播歌 34.5fps/29.0ms → 51fps/19.5ms；CPU 27.6% → 11.4%；stage 由 34 次/秒 → 2 次/秒（时钟每秒变两次）。
+
+\## 顺带确认的事实
+- 帧时钟在这套 Win32+DComp 上是 GdkFrameClockIdle：不开墙时静止/只有背景时约 30fps（背景本来就是 30fps 泵）；歌词扫描时约 50fps；开墙时 137fps（wallgl 的 tick 常驻，把时钟拉到显示器刷新率）——墙静止空转是已知待跟进项（TODO）。
+- 试过给主画布做像素缓存（ARGB32 + stage_rev 失效）：GTK 并不会每帧重跑 draw_func，缓存反而把每次重画从 6ms 抬到 12ms（image surface 要真栅格化），已回退，不要重复这个坑。
+
+\## 后续（TODO P1）
+- theme.c 的 text_draw 每次重建 PangoLayout → 可加 LRU 排版缓存（过渡动画期间主画布重画频繁时才明显）。
+- wallgl tick 常驻：静止时应撤掉 tick、由 playlist_request_frame 重新 kick。

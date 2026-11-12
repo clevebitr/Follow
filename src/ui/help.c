@@ -39,6 +39,7 @@ void help_draw(cairo_t *cr, double width, double height)
         { KEY_PLAYLIST,     "打开 / 关闭播放列表" },
         { KEY_FULLSCREEN,   "全屏切换" },
         { KEY_HELP,         "打开 / 关闭这一页" },
+        { KEY_PERF,         "性能检测层（帧率 / 各层耗时）" },
         { KEY_BACK,         "关闭这一页 / 退出全屏" },
         { KEY_QUIT,         "退出" },
     };
