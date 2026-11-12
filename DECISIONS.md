@@ -207,3 +207,12 @@ idx=19 exit=0.14→0.19  y 397.8→363.1   ← 预推出列 0.2s 滑走
 - 标题栏移动**不接管**，交给 GtkWindowHandle（`drag-begin` 回调里判断不在边缘就直接 return，不 claim）。`GtkGestureDrag` 自身不会 claim（源码里 begin/update 只发信号），所以不会抢走序列。
 - 边缘缩放改用 `gdk_toplevel_begin_resize()`（GDK 自己的上下文），删掉整套 Win32 自定义 `WindowDrag` / `SetWindowPos` / `GetWindowRect` 代码；顺手把 Win32 与其它平台的两套实现合并成一套。
 - 缩放开始 / 结束（`drag-end` + `cancel`，注意 GtkGestureDrag 没有 `drag-cancel` 信号，要用 GtkGesture 的 `cancel`）负责 `app.win_dragging` 与 `lyricgl_drag_state()`，缩放期间暂停动画。
+
+## 2026-11-12 — 歌词改为水平居中并放宽列宽
+
+歌词排版对齐调整（用户选择：整体居中 + 列宽放宽，保持 4 槽）：
+
+- 水平居中：每个视觉行按**文字实际宽度**在列内居中（`Row.w` 在排版时用 text_width 量好），缩放基准从"行左边界"改为"文字水平中心"，居中后放大不会偏。
+- 列宽：`lyric_w` 由"= 时钟宽"改为"时钟宽 × LYRIC_W_GROW(1.20)"，上限仍是左列可用宽度。1920×1080 实测 688 → 826，长句折行减少。
+- 实测：不同长度的行（810 / 240 / 324 / 148px）中心都落在 501（列中心），槽间 pitch 97 不变。
+- 已知取舍：居中轴心用"列中心"（501）而不是"时钟中心"（432），因为要放得下 826 的折行宽度；若想和手写体时钟共用竖轴，需要把列宽压回 688。另一个副作用：长句 `w_max ≈ 列宽` 时，演出行 1.15 倍放大被夹到接近 1.0，短句仍能完整放大。

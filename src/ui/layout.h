@@ -58,6 +58,7 @@ typedef struct {
 #define LYRIC_SLOT_ROWS 2
 #define LYRIC_ROW_EM    1.30    /* 单行文字行高与字号之比 */
 #define LYRIC_CLOCK_MIN 0.85    /* 为歌词区让位时时钟的最小缩放比例 */
+#define LYRIC_W_GROW    1.20    /* 歌词列宽 / 时钟宽度 */
 
 /* 歌词槽高度（逻辑像素） */
 double lyric_slot_h(double px);

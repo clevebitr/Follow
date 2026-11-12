@@ -242,6 +242,7 @@ typedef struct {
     int     n_chars;   /* 这段几个字 */
     double  dy;        /* 相对整句顶部的偏移（逻辑像素） */
     double  h;         /* 行高（逻辑像素） */
+    double  w;         /* 这一行的文字宽度（逻辑像素，居中用） */
     guint8 *order;     /* 逐字时间坐标 0..255（NULL = 整行一起亮） */
 } Row;
 
@@ -670,7 +671,8 @@ static void report_lines(void)
                 Rgba c = l->col;
 
                 c.a = CLAMP(l->alpha, 0.0, 1.0);
-                uidbg_record_text(g_geom.x, y, g_geom.w, row->h,
+                uidbg_record_text(g_geom.x + MAX(0.0, (g_geom.w - row->w) * 0.5),
+                                  y, MIN(row->w, g_geom.w), row->h,
                                   l->lay_px > 0.0 ? l->lay_px : g_geom.px,
                                   c, row->text);
             }
@@ -966,11 +968,18 @@ static void draw_row(Line *line, const Row *row)
     if (slot == NULL || slot->tex == 0)
         return;
 
-    q.x  = x_dev - (double)slot->pad;
+    /* 水平居中：文字块在歌词列内居中，缩放基准取文字水平中心 */
+    {
+        double text_w = (double)slot->w - (double)slot->pad * 2.0;
+        double left   = x_dev + (g_geom.w * (double)g_scale - text_w) * 0.5;
+
+        q.x  = left - (double)slot->pad;
+        q.ox = left + text_w * 0.5;
+    }
+
     q.y  = y_dev - (double)slot->pad;
     q.w  = (double)slot->w;
     q.h  = (double)slot->h;
-    q.ox = x_dev;
     q.oy = (line->y + line->h * 0.5) * (double)g_scale;
 
     /* 限制放大后不越出歌词区。夹取系数按整句最宽的一行计算，
@@ -1347,8 +1356,10 @@ static void line_rows_build(Line *l, const gchar *text)
         row->dy      = rows[i].y;
         row->h       = MAX(rows[i].h, 1.0);
 
-        if (row->n_chars > 0)
-            l->w_max = MAX(l->w_max, text_width(g_measure_cr, row->text, &style));
+        if (row->n_chars > 0) {
+            row->w   = text_width(g_measure_cr, row->text, &style);
+            l->w_max = MAX(l->w_max, row->w);
+        }
 
         if (row->n_chars <= 0) {
             g_clear_pointer(&row->text, g_free);

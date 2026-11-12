@@ -326,6 +326,7 @@ void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                           L->hint_y - h * GAP_LYRIC_HINT);
     L->lyric_area_h = L->lyric_bottom - L->lyric_y;
 
-    /* 歌词卡片的宽度上限 = 时钟宽度（居中在时钟下面） */
-    L->lyric_w = MIN(L->left_w, L->clock_w);
+    /* 歌词列宽：时钟宽度的 LYRIC_W_GROW 倍（不超过左列可用宽度）。
+     * 比时钟略宽可以让长句少折行，居中排版时两侧留白也更均匀。 */
+    L->lyric_w = MIN(L->left_w, L->clock_w * LYRIC_W_GROW);
 }
