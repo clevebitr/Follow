@@ -272,3 +272,10 @@ NEXT 标识改为卡片内背景水印（用户建议）：
 - 卡片内部右侧改画低对比水印：`FONT_MONO`、字号 `next_px × 1.25`、字距 `× 0.30`、`WHITE(0.11)`，右对齐并裁在卡片圆角内，先画水印再画缩略图与文字（压在下面）。切卡动画时水印随卡片一起做位移 / 缩放 / 淡入。
 - 左列纵向分配相应简化：`bottom = stats_bottom - next_h - NEXT_GAP`，原来的三处间距（曲名 / 二维码 / 胶囊）继续均分剩余空间，因此胶囊下方现在有 ~25px 呼吸。
 - 顺带把统计块定位改成按墨迹底边（`stats_bottom = 底边内边距 - STATS_LIFT`，`stats_y = stats_bottom - stats_ink_bot`），NEXT 卡底边、统计文字底部、热力图底部三者共线；此前 `stats_y + stats_h` 是按排版框算的，比视觉底部高 14px。
+
+## 2026-11-12 — 封面回调被 idle 优先级饿死；胶囊上移
+
+两个问题的定位与修法：
+
+1) **切换 NEXT 后卡片没有封面**（只有第一张能出）。层层加日志后确认：封面线程早已从磁盘缓存解码完成并 `g_idle_add(covercache_done, job)`，但主线程**永远不执行这个 idle 回调**。原因是 `g_idle_add()` 用 `G_PRIORITY_DEFAULT_IDLE`(200)，而界面在持续 60fps 重绘 + 16/33/100ms 定时器，空闲优先级被无限期压后（第一张之所以能出，是启动瞬间有短暂空档）。改用 `g_idle_add_full(G_PRIORITY_DEFAULT, …)` 后回调 7ms 内执行。**教训：任何从工作线程回到 UI 线程的完成回调都不要用 idle 优先级。**
+2) **胶囊贴卡片**：封面列纵向分配里 `bottom = stats_bottom - next_h - (NEXT_GAP + GAP_BADGE_NEXT)`，新增 `GAP_BADGE_NEXT = 0.032h`（1080p 下约 34px），胶囊整体上移，与卡片间距约 57px；省下的空间仍按原规则在曲名 / 二维码 / 胶囊三处均分。
