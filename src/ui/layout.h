@@ -47,6 +47,9 @@ typedef struct {
     /* 统计块（无衬底）：左侧热力图 + 右侧墙钟 / 收听时长 */
     double stats_x, stats_y, stats_w, stats_h;          /* 整块外框 */
     double stats_heat_x, stats_heat_y;                  /* 热力图左上角 */
+    double stats_heat_dy;                              /* 热力图相对墙钟排版框顶部的偏移 */
+    double stats_ink_bot;                              /* 文字墨迹下沿（相对排版框顶部） */
+    double stats_bottom;                               /* 统计块视觉底边（与 NEXT 卡共线） */
     double stats_text_x;                                /* 文字列左边界 */
     double stats_wall_y, stats_line_y;                  /* 墙钟 / 时长行上沿 */
     double stats_clock_px, stats_px;

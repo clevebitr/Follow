@@ -104,6 +104,21 @@ double text_height(cairo_t *cr, const char *text, const TextStyle *style)
 /* 墨迹（实际绘制部分）相对排版框顶部的下边界。
  * 手写体等字体的排版框留白很大（158px 的字排版框可达 277px），
  * 需要贴合字形排版时应使用墨迹而非框高。无墨迹时返回 0。 */
+double text_ink_top(cairo_t *cr, const char *text, const TextStyle *style)
+{
+    PangoLayout   *layout;
+    PangoRectangle ink;
+
+    if (text == NULL || *text == '\0' || style->px <= 0.0)
+        return 0.0;
+
+    layout = build_layout(cr, text, style);
+    pango_layout_get_pixel_extents(layout, &ink, NULL);
+    g_object_unref(layout);
+
+    return ink.width <= 0 && ink.height <= 0 ? 0.0 : (double)ink.y;
+}
+
 double text_ink_bottom(cairo_t *cr, const char *text, const TextStyle *style)
 {
     PangoLayout   *layout;
