@@ -1,0 +1,55 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "_base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "mingw64",
+      "displayName": "MSYS2 MINGW64 · Release",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "mingw64-debug",
+      "displayName": "MSYS2 MINGW64 · Debug",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "mingw64",
+      "configurePreset": "mingw64"
+    },
+    {
+      "name": "mingw64-debug",
+      "configurePreset": "mingw64-debug"
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "mingw64",
+      "displayName": "NSIS 安装包",
+      "configurePreset": "mingw64",
+      "generators": [
+        "NSIS"
+      ]
+    }
+  ]
+}

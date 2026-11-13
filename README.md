@@ -12,7 +12,7 @@
 
 ## 开始使用
 
-需要 GTK 4、libepoxy、FFmpeg、libcurl、JSON-GLib、libqrencode、librsvg，以及一个 C 编译器。
+需要 GTK 4、libepoxy、FFmpeg、libcurl、JSON-GLib、libqrencode、librsvg，以及一个 C 编译器 + CMake（≥ 3.25）。
 
 ```sh
 # MSYS2 / MinGW-w64
@@ -32,11 +32,12 @@ sudo apt install build-essential pkg-config libgtk-4-dev libepoxy-dev \
 ```
 
 ```sh
-make          # 产物是 ./main.exe
-./main.exe    # 在项目根目录跑：资源路径是相对的
+cmake --preset mingw64     # 或者 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build        # 产物是 ./main.exe
+./main.exe                 # 在项目根目录跑：资源路径是相对的
 ```
 
-配置文件是 `src/config.ini`（[GKeyFile](https://docs.gtk.org/glib/struct.KeyFile.html) 格式，手写），改完在命令面板里 `Reload config.ini` 即可。最小示例：
+配置文件是 `src/config.ini`（[GKeyFile](https://docs.gtk.org/glib/struct.KeyFile.html) 格式，手写），命令面板里的 `Open Config File...` 会用系统默认编辑器打开它，改完再用 `Reload config.ini` 生效。最小示例：
 
 ```ini
 [window]
@@ -68,6 +69,16 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 同样会解析（
 
 > YouTube 按出口 IP 判人机验证：机房 IP / 公共代理常被挡，`[net] proxy` 对 YouTube 基本必填。
 > 另外 googlevideo 只接受定长 Range 请求，YouTube 音源改由 `src/core/httpstream.c` 用 libcurl 分块拉流再喂给解码器（seek 仍然正确），这是实现细节，不用管。
+
+## 构建与打包（CMake + CPack）
+
+构建系统是 CMake，`CMakePresets.json` 里预置了 MSYS2 MINGW64 的配置（Ninja + Release / Debug）。可执行文件默认生成在源码根目录（`FOLLOW_EXE_IN_SOURCE_DIR=ON`），因为 `src/style`、`src/icons`、`src/config.ini` 都是相对路径。
+
+```sh
+cmake --preset mingw64
+cmake --build build
+```
+
 
 ## 功能
 
@@ -120,7 +131,7 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 同样会解析（
 
 ### 命令面板
 
-`Ctrl+Shift+P` 打开 VSCode 风格命令框，可执行：`Reload config.ini`、`Audio volume...`（±5% / 50% / 100% / 静音）、`Audio output...`（切换播放设备）、`Visualizer...`、`Toggle animations`、`Cycle repeat mode`、`Toggle shuffle`、`Lyrics offset` 调整 / 复位、开墙、帮助页、全屏、退出。音量 / 静音 / 输出设备写在 `<cache>/follow/settings.ini`，与 `config.ini` 分开，重载 ini 不会冲掉。
+`Ctrl+Shift+P` 打开命令框。
 
 ## 快捷键（默认）
 
@@ -170,7 +181,7 @@ src/icons/   品牌字标 + 项目 logo
 src/style/   GTK 外壳样式（窗口底色 + 极细的标题栏）
 src/assets/  示例音频与封面（不入库，按 config.ini 放自己的文件）
 src/models/  内置的 miniaudio.h
-crates/      gtk-mcp-agent-capi：把 uidbg 调试通道包成 MCP 工具（make mcp）
+crates/      gtk-mcp-agent-capi：把 uidbg 调试通道包成 MCP 工具（cmake --build build --target mcp）
 ```
 
 ## 免责声明 / Disclaimer
@@ -260,8 +271,8 @@ crates/      gtk-mcp-agent-capi：把 uidbg 调试通道包成 MCP 工具（make
 调界面时最贵的一步是截图。应用里留了一条调试通道，把「屏幕上画了什么」变成结构化文本；不带 `FOLLOW_UIDBG` 启动时 `uidbg_*` 全是空调用，不开端口。
 
 ```sh
-make            # 应用
-make mcp        # 生成 build/gtk-mcp-agent.exe
+cmake --preset mingw64 && cmake --build build      # 应用
+cmake --build build --target mcp                   # 需先 -DFOLLOW_BUILD_MCP=ON
 FOLLOW_UIDBG=1 ./main.exe          # 开调试通道（默认 7878）
 ```
 

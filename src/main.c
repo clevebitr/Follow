@@ -29,6 +29,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 #endif
 
 #include <stdlib.h>
@@ -368,6 +369,60 @@ void ui_toggle_fullscreen(void)
         gtk_window_unfullscreen(window);
     else
         gtk_window_fullscreen(window);
+}
+
+/* 用系统默认程序打开配置文件：先走 GIO，Windows 上再退回 ShellExecuteW，
+ * 最后退回记事本。成功返回 NULL，失败返回可展示的错误文本。 */
+gchar *ui_open_config_file(void)
+{
+    g_autofree gchar *path = g_canonicalize_filename(CONFIG_PATH, NULL);
+
+    if (!g_file_test(path, G_FILE_TEST_EXISTS))
+        return g_strdup_printf("找不到配置文件：%s", path);
+
+    {
+        GdkDisplay        *display = gdk_display_get_default();
+        GAppLaunchContext *context = display != NULL
+            ? G_APP_LAUNCH_CONTEXT(gdk_display_get_app_launch_context(display))
+            : NULL;
+        GError           *error = NULL;
+        g_autofree gchar *uri   = g_filename_to_uri(path, NULL, NULL);
+        gboolean          ok    = FALSE;
+
+        /* 不给 launch context 时 GLib 会打 g_app_launch_context CRITICAL */
+        if (uri != NULL)
+            ok = g_app_info_launch_default_for_uri(uri, context, &error);
+
+        g_clear_object(&context);
+        g_clear_error(&error);   /* 失败就交给下面的平台兜底 */
+
+        if (ok)
+            return NULL;
+    }
+
+#if defined(_WIN32)
+    {
+        gunichar2 *wpath = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
+        gboolean   ok    = FALSE;
+
+        if (wpath != NULL) {
+            if ((INT_PTR)ShellExecuteW(NULL, L"open", (LPCWSTR)wpath, NULL,
+                                       NULL, SW_SHOWNORMAL) > 32)
+                ok = TRUE;
+            else if ((INT_PTR)ShellExecuteW(NULL, L"open", L"notepad.exe",
+                                            (LPCWSTR)wpath, NULL,
+                                            SW_SHOWNORMAL) > 32)
+                ok = TRUE;
+
+            g_free(wpath);
+        }
+
+        if (ok)
+            return NULL;
+    }
+#endif
+
+    return g_strdup_printf("无法打开 %s：系统中没有可用的编辑器", path);
 }
 
 void ui_reload_config(void)
@@ -1367,7 +1422,8 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     (void)user_data;
 
     if (app.tick_id != 0)
-        g_source_remove(app.tick_id);    if (app.bg_tick_id != 0)
+        g_source_remove(app.tick_id);
+    if (app.bg_tick_id != 0)
         g_source_remove(app.bg_tick_id);
     if (app.anim_id != 0) {
         g_source_remove(app.anim_id);

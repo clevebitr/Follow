@@ -142,4 +142,8 @@ void ui_sync_layers(void);
 void ui_reload_config(void);
 void ui_toggle_fullscreen(void);
 
+/* 用系统默认程序打开 src/config.ini
+ * 成功返回 NULL，失败返回要展示给用户的错误文本（调用方 g_free）。 */
+gchar *ui_open_config_file(void);
+
 #endif /* FOLLOW_UI_H */

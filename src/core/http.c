@@ -13,8 +13,51 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <wchar.h>
+#endif
+
 #include "http.h"
 #include "config.h"
+
+#if defined(_WIN32)
+/* HTTPS 用的 CA 证书 */
+static void http_use_bundled_ca(void)
+{
+    wchar_t  wbuf[MAX_PATH];
+    wchar_t *slash;
+    char     path[MAX_PATH * 3];
+    DWORD    n;
+    int      len;
+
+    if (getenv("CURL_CA_BUNDLE") != NULL || getenv("SSL_CERT_FILE") != NULL)
+        return;
+
+    n = GetModuleFileNameW(NULL, wbuf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH)
+        return;
+
+    slash = wcsrchr(wbuf, L'\\');
+    if (slash == NULL)
+        return;
+    *slash = L'\0';
+
+    len = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, path, (int)sizeof(path) - 1, NULL, NULL);
+    if (len <= 0)
+        return;
+
+    strncat(path, "\\etc\\ssl\\certs\\ca-bundle.crt",
+            sizeof(path) - strlen(path) - 1);
+
+    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
+        return;
+
+    _putenv_s("CURL_CA_BUNDLE", path);
+    _putenv_s("SSL_CERT_FILE", path);
+}
+#endif
 
 typedef struct {
     char  *data;
@@ -55,6 +98,10 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 
 int http_global_init(void)
 {
+#if defined(_WIN32)
+    http_use_bundled_ca();
+#endif
+
     return curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK ? 0 : -1;
 }
 

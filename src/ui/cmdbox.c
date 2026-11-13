@@ -21,6 +21,7 @@
 #include "viz.h"
 typedef enum {
     ACT_RELOAD = 0,
+    ACT_OPEN_CONFIG,
     ACT_VOLUME_MENU,
     ACT_OUTPUT_MENU,
     ACT_VIZ_MENU,
@@ -250,6 +251,8 @@ static void palette_show_root(gboolean clear_query)
     g_autofree gchar *lrc  = g_strdup_printf("%+d ms", app.lrc_offset_ms);
     begin_menu(MENU_ROOT, "输入命令，Enter 执行，Esc 关闭", clear_query);
     add_item("Reload config.ini", "重新读取 src/config.ini", ACT_RELOAD, NULL);
+    add_item("Open config file...", "用默认编辑器打开 src/config.ini",
+             ACT_OPEN_CONFIG, NULL);
     add_item("Audio volume...", vol, ACT_VOLUME_MENU, NULL);
     add_item("Audio output...", out, ACT_OUTPUT_MENU, NULL);
     add_item("Visualizer...", viz_effect_name(), ACT_VIZ_MENU, NULL);
@@ -348,6 +351,16 @@ static void run_item(PaletteItem *item)
         palette_close();
         ui_reload_config();
         break;
+    case ACT_OPEN_CONFIG: {
+        g_autofree gchar *error = ui_open_config_file();
+
+        if (error != NULL) {
+            set_message(error);
+            break;
+        }
+        palette_close();
+        break;
+    }
     case ACT_VOLUME_MENU:
         palette_show_volume(TRUE);
         break;

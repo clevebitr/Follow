@@ -4,3 +4,5 @@ build/
 *.exe
 main.exe.old
 crates/*/target/
+_CPack_Packages/
+*.back
