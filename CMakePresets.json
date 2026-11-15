@@ -20,7 +20,8 @@
       "displayName": "MSYS2 MINGW64 · Release",
       "inherits": "_base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "FOLLOW_WIN_GUI": "ON"
       }
     },
     {
@@ -28,7 +29,8 @@
       "displayName": "MSYS2 MINGW64 · Debug",
       "inherits": "_base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FOLLOW_WIN_GUI": "OFF"
       }
     }
   ],

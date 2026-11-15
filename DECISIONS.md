@@ -37,3 +37,11 @@ Release 由 .github/workflows/release.yml 负责，触发条件为 push v* tag �
 ## 2026-11-15 — 通用配置与个人配置隔离
 
 仓库只保留通用模板 src/config.ini（无个人曲目、无个人链接，全部 [audioN] 以注释示例给出）。个人配置放在 src/config.local.ini，已加入 .gitignore；程序启动时按 FOLLOW_CONFIG > src/config.local.ini > src/config.ini 的顺序选择配置，命令面板的 Open Config File / Reload config.ini 也使用当前生效的路径。CMake install 只安装 src/config.ini，因此 NSIS、portable zip、Linux tar 与源码归档都不会包含个人配置。已验证：本地配置 12 首、通用模板 0 首；安装目录只有 src/config.ini，无 config.local.ini。
+
+## 2026-11-15 — Windows GUI 与控制台、图标拆分
+
+Windows 默认改用 GUI 子系统（FOLLOW_WIN_GUI=ON），启动不再创建控制台；Debug preset 显式设为 OFF 以便看日志。图标拆分为两份：src/icons/logo.svg 保留浅色背景用于展示，src/icons/logo-mark.svg 为透明背景标记；由 logo-mark.svg 生成 src/icons/logo.ico，通过 src/icons/logo.rc 嵌入 exe，并作为 NSIS MUI 图标。运行时新增 ui/appicon.c：用 gdk-pixbuf 加载 logo-mark.svg，设置 GdkToplevel icon-list 与 icon-name；Linux 安装 share/applications/<app-id>.desktop（Terminal=false）和 hicolor <app-id>.svg，install.sh 会把 Exec 改写为绝对路径。CMakePresets 的 Release 设 GUI ON、Debug 设 OFF。已验证 Windows 子系统为 GUI、exe 图标可提取、CPack NSIS 生成成功、Linux install.sh 桌面/图标安装逻辑在 WSL 通过。
+
+## 2026-11-15 — 可执行文件改名 follow 与 v0.1.1
+
+v0.1.1 将可执行文件名从 main 改为 follow：FOLLOW_EXE_NAME 默认 follow，本地构建产物 follow.exe；Windows portable zip 内为 Follow/follow.exe，NSIS 安装后的入口也是 follow.exe。Linux 包内二进制为 Follow/follow，不再额外生成同名启动脚本；install.sh 只在 $PREFIX/bin/follow 放一个绝对路径 wrapper，并安装 .desktop / hicolor 图标。crates 调试工具与 .pi/mcp.json 的默认路径同步改为 follow.exe。CMake 默认版本改为 0.1.1。Windows 默认 GUI 子系统，Debug preset 保持控制台。

@@ -27,6 +27,7 @@
 #endif
 
 #include "backdrop.h"
+#include "appicon.h"
 #include "backdropgl.h"
 #include "cache.h"
 #include "config.h"
@@ -125,6 +126,12 @@ static gboolean apply_window_edge_idle(gpointer data)
 {
     apply_window_edge(GTK_WIDGET(data));
     return G_SOURCE_REMOVE;
+}
+
+static void on_window_realize_icon(GtkWidget *widget, gpointer data)
+{
+    (void)data;
+    appicon_apply(widget);
 }
 
 static void on_window_realize(GtkWidget *widget, gpointer data)
@@ -1245,6 +1252,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     }
 
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
+    g_signal_connect(window, "realize", G_CALLBACK(on_window_realize_icon), NULL);
 
     {
         GtkGesture *resize = gtk_gesture_drag_new();
@@ -1293,6 +1301,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     player_update_window_title();
 
     gtk_window_present(GTK_WINDOW(window));
+    appicon_apply(window);
 
     if (g_getenv("FOLLOW_UIDBG") != NULL)
         uidbg_start(window);
@@ -1441,6 +1450,7 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     g_clear_pointer(&app.snapshot, cairo_surface_destroy);
 
     perf_clear();
+    appicon_clear();
     uidbg_stop();
 
     metadata_shutdown();
@@ -1469,6 +1479,9 @@ int main(int argc, char **argv)
 {
     GtkApplication *app_;
     int             status;
+
+    g_set_prgname(FOLLOW_APP_ID);
+    g_set_application_name(WINDOW_TITLE);
 
 #if defined(_WIN32)
     SetConsoleOutputCP(CP_UTF8);

@@ -21,4 +21,4 @@ auto-breakpoint: false
 ## Current: M4 — 主画布换纹理节点，消掉每帧 cairo 重生（详见 #22）
 
 goal: 主画布纹理化，消掉每帧 cairo 重生
-breakpoint: 通用 config 已就绪；个人配置在 config.local.ini（未提交）
+breakpoint: Windows GUI/图标优化完成；改动未提交，未发 v0.1.1

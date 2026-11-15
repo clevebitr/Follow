@@ -73,6 +73,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/music/src/media.c"
 # ui
 follow_module(ui
     SOURCES
+        ui/src/appicon.c
         ui/src/backdrop.c
         ui/src/backdropgl.c
         ui/src/cmdbox.c

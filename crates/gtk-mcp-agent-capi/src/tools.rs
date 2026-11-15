@@ -165,7 +165,7 @@ pub fn list() -> Vec<Value> {
         }),
         json!({
             "name": "ui_launch",
-            "description": "带调试通道启动 main.exe（FOLLOW_UIDBG=1），已经在跑就直接复用。改了代码想重开时，先 ui_key ctrl+q 退出再调它。",
+            "description": "带调试通道启动 follow.exe（FOLLOW_UIDBG=1），已经在跑就直接复用。改了代码想重开时，先 ui_key ctrl+q 退出再调它。",
             "inputSchema": { "type": "object", "properties": {} }
         }),
     ]
@@ -851,10 +851,10 @@ fn ui_launch(client: &Client) -> Result<Vec<Value>, String> {
     let root = repo_root();
     let app = std::env::var("FOLLOW_APP")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| root.join("main.exe"));
+        .unwrap_or_else(|_| root.join("follow.exe"));
 
     if !app.exists() {
-        return Err(format!("找不到 {}（先 make 出 main.exe）", app.display()));
+        return Err(format!("找不到 {}（先构建 follow.exe）", app.display()));
     }
 
     // MSYS2 GTK 运行时需要 mingw64/bin 在 PATH 中

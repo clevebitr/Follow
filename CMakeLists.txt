@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 # 开发：cmake --preset mingw64 && cmake --build build
 # 打包：cpack --preset mingw64
 
-set(FOLLOW_VERSION "0.1.0" CACHE STRING "项目版本（release 时由 tag 覆盖）")
+set(FOLLOW_VERSION "0.1.1" CACHE STRING "项目版本（release 时由 tag 覆盖）")
 
 project(Follow
     VERSION      ${FOLLOW_VERSION}
@@ -42,13 +42,13 @@ set(FOLLOW_PKGS
 pkg_check_modules(FOLLOW_DEPS REQUIRED IMPORTED_TARGET ${FOLLOW_PKGS})
 
 # 选项
-set(FOLLOW_EXE_NAME "main" CACHE STRING "可执行文件名（不带 .exe）")
+set(FOLLOW_EXE_NAME "follow" CACHE STRING "可执行文件名（不带 .exe）")
 set(FOLLOW_APP_ID "org.github.clevebitr.follow" CACHE STRING "GApplication id")
 
 option(FOLLOW_EXE_IN_SOURCE_DIR
-       "可执行文件生成到源码根目录（读 src/ 下的相对路径资源，开发时 ./main.exe）" ON)
+       "可执行文件生成到源码根目录（读 src/ 下的相对路径资源，开发时 ./follow.exe）" ON)
 option(FOLLOW_WIN_GUI
-       "Windows 下用 GUI 子系统（不弹控制台；调试日志会看不到）" OFF)
+       "Windows 使用 GUI 子系统（默认不显示控制台；调试时用 OFF）" ON)
 option(FOLLOW_INSTALL_ASSETS
        "安装/打包时带上 src/assets（自己的音频、封面）" OFF)
 option(FOLLOW_BUILD_MCP
@@ -58,6 +58,7 @@ option(FOLLOW_BUILD_MCP
 add_subdirectory(src)
 
 target_compile_definitions(follow PRIVATE FOLLOW_APP_ID="${FOLLOW_APP_ID}")
+target_compile_definitions(follow_ui PRIVATE FOLLOW_APP_ID="${FOLLOW_APP_ID}")
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(follow PRIVATE m dl pthread)
@@ -66,6 +67,10 @@ endif()
 set_target_properties(follow PROPERTIES OUTPUT_NAME "${FOLLOW_EXE_NAME}")
 
 if(WIN32)
+    enable_language(RC)
+    target_sources(follow PRIVATE "${PROJECT_SOURCE_DIR}/src/icons/logo.rc")
+    target_include_directories(follow PRIVATE "${PROJECT_SOURCE_DIR}/src/icons")
+
     # Windows 11：去掉 DWM 默认的 1px 边框 / 圆角
     target_link_libraries(follow PRIVATE dwmapi)
     set_target_properties(follow PROPERTIES WIN32_EXECUTABLE ${FOLLOW_WIN_GUI})
@@ -96,6 +101,17 @@ endif()
 
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION .)
 install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION . OPTIONAL)
+
+if(UNIX AND NOT APPLE)
+    configure_file("${PROJECT_SOURCE_DIR}/cmake/follow.desktop.in"
+                   "${CMAKE_BINARY_DIR}/follow.desktop" @ONLY)
+    install(FILES "${CMAKE_BINARY_DIR}/follow.desktop"
+            DESTINATION share/applications
+            RENAME "${FOLLOW_APP_ID}.desktop")
+    install(FILES "${PROJECT_SOURCE_DIR}/src/icons/logo-mark.svg"
+            DESTINATION share/icons/hicolor/scalable/apps
+            RENAME "${FOLLOW_APP_ID}.svg")
+endif()
 
 # 运行时 DLL（Windows）
 include(cmake/FollowRuntime.cmake)

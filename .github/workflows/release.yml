@@ -114,7 +114,6 @@ jobs:
         run: |
           mkdir -p pkg/Follow
           cmake --install build --prefix "$PWD/pkg/Follow"
-          printf '#!/bin/sh\nDIR=$(dirname "$(readlink -f "$0")")\ncd "$DIR" && exec ./main "$@"\n' > pkg/Follow/follow
           cat > pkg/Follow/install.sh <<'INSTALL'
           #!/bin/sh
           set -eu
@@ -123,12 +122,23 @@ jobs:
           DEST=$PREFIX/share/follow
           mkdir -p "$DEST" "$PREFIX/bin"
           cp -a "$SRC/." "$DEST/"
-          printf '#!/bin/sh\ncd "%s" && exec ./main "$@"\n' "$DEST" > "$PREFIX/bin/follow"
+          printf '#!/bin/sh\ncd "%s" && exec ./follow "$@"\n' "$DEST" > "$PREFIX/bin/follow"
           chmod +x "$PREFIX/bin/follow"
+
+          DESKTOP=$(find "$SRC/share/applications" -name '*.desktop' 2>/dev/null | head -n 1)
+          if [ -n "$DESKTOP" ]; then
+              APP_ID=$(basename "$DESKTOP" .desktop)
+              mkdir -p "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/scalable/apps"
+              sed "s|^Exec=.*|Exec=$PREFIX/bin/follow|" "$DESKTOP" > "$PREFIX/share/applications/$APP_ID.desktop"
+              if [ -f "$SRC/share/icons/hicolor/scalable/apps/$APP_ID.svg" ]; then
+                  cp "$SRC/share/icons/hicolor/scalable/apps/$APP_ID.svg" "$PREFIX/share/icons/hicolor/scalable/apps/$APP_ID.svg"
+              fi
+          fi
+
           echo "Follow installed to $DEST"
           echo "Run: follow"
           INSTALL
-          chmod +x pkg/Follow/follow pkg/Follow/install.sh
+          chmod +x pkg/Follow/install.sh
           tar -czf "Follow-${SEMVER}-linux-x86_64.tar.gz" -C pkg Follow
 
       - uses: actions/upload-artifact@v4
@@ -161,7 +171,7 @@ jobs:
           body: |
             ## 安装
 
-            - **Windows**：运行 `Follow-*-win64.exe` 安装包；或解压 `Follow-*-win64-portable.zip` 后进入 `Follow` 目录运行 `main.exe`。
+            - **Windows**：运行 `Follow-*-win64.exe` 安装包；或解压 `Follow-*-win64-portable.zip` 后进入 `Follow` 目录运行 `follow.exe`。
             - **Linux**：解压 `Follow-*-linux-x86_64.tar.gz`，确保已安装 GTK4 / FFmpeg 等运行库；执行 `cd Follow && ./install.sh` 安装到 `~/.local`，或直接运行 `./follow`。
 
             配置、快捷键与平台支持见 README。

@@ -1,25 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" width="128" height="64"
-     role="img" aria-label="Follow Player">
-  <g fill="none" stroke="#8a8f99" stroke-width="2.4"
-     stroke-linecap="round" stroke-linejoin="round">
-    
-    <!-- 左侧：F + 播放三角融合图标 (按比例缩小适配) -->
-    <path d="M 14 16 L 14 48" />
-    <path d="M 14 16 L 34 16" />
-    <path d="M 14 32 L 20 32" />
-    <path d="M 20 22 L 38 32 L 20 42 Z" />
-    
-    <!-- 右侧：艺术线条文字 "ollow" -->
-    <!-- o -->
-    <circle cx="54" cy="32" r="7" />
-    <!-- o -->
-    <circle cx="70" cy="32" r="7" />
-    <!-- l -->
-    <path d="M 84 16 L 84 48" />
-    <!-- o -->
-    <circle cx="98" cy="32" r="7" />
-    <!-- w (极简几何折线) -->
-    <path d="M 110 20 L 110 48 M 110 48 L 118 34 L 126 48 L 126 20" />
-    
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Music Player</title>
+  <defs>
+    <linearGradient id="mp-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7FAFC"/><stop offset="1" stop-color="#E4EBF2"/>
+    </linearGradient>
+    <linearGradient id="mp-top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A9C8DF"/><stop offset="1" stop-color="#8FB3CC"/>
+    </linearGradient>
+    <linearGradient id="mp-left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7498B5"/><stop offset="1" stop-color="#61869F"/>
+    </linearGradient>
+    <linearGradient id="mp-right" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#547A98"/><stop offset="1" stop-color="#456A88"/>
+    </linearGradient>
+    <filter id="mp-soft" x="-40%" y="-120%" width="180%" height="340%">
+      <feGaussianBlur stdDeviation="2.5"/>
+    </filter>
+  </defs>
+
+  <!-- 背景：轻渐变 + 1px 描边，白底上也有轮廓 -->
+  <rect x="0.5" y="0.5" width="127" height="127" rx="27.5" fill="url(#mp-bg)" stroke="#D5DEE7"/>
+
+  <!-- 落地软阴影 -->
+  <ellipse cx="58" cy="95" rx="27" ry="5.5" fill="#1F2B38" opacity="0.14" filter="url(#mp-soft)"/>
+
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- 三个面：顶亮 / 左中 / 右暗，光源统一在左上 -->
+    <path d="M58 34 L82 48 L58 62 L34 48 Z" fill="url(#mp-top)"/>
+    <path d="M34 48 L58 62 L58 90 L34 76 Z" fill="url(#mp-left)"/>
+    <path d="M82 48 L82 76 L58 90 L58 62 Z" fill="url(#mp-right)"/>
+
+    <!-- 线框：减到 3，退居次要层 -->
+    <path d="M58 34 L82 48 L82 76 L58 90 L34 76 L34 48 Z
+             M58 62 L82 48 M58 62 L34 48 M58 62 L58 90"
+          fill="none" stroke="#1F2B38" stroke-width="3"/>
+
+    <!-- 壳内波形： shear 变换使其真正贴合右面透视；
+         基线延长线恰好穿过右棱中点 (82,62) -->
+    <path d="M-8 0 C-6.5 0 -6 -3.5 -4 -3.5
+             C-1.5 -3.5 1.5 3.5 4 3.5
+             C6 3.5 6.5 0 8 0"
+          transform="matrix(1 -0.5833 0 1 70 69)"
+          fill="none" stroke="#5FD3D3" stroke-width="3"/>
+
+    <!-- 壳外波形：从右棱中点同高度发出，振幅 3.5 → 14（放大 4 倍），
+         干净的一个完整周期，端点落回中线 -->
+    <path d="M90 62 C93 62 93.5 48 97.5 48
+             C101.5 48 102.5 76 106.5 76
+             C110.5 76 111 62 114 62"
+          fill="none" stroke="#00A6A6" stroke-width="5"/>
   </g>
 </svg>

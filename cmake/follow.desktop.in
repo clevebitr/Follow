@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Follow
+GenericName=Music Player
+Comment=Minimal music player for stream overlays
+Exec=follow
+Icon=@FOLLOW_APP_ID@
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupNotify=true
+StartupWMClass=@FOLLOW_APP_ID@

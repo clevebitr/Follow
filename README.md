@@ -38,8 +38,8 @@ sudo apt install build-essential pkg-config libgtk-4-dev libepoxy-dev \
 
 ```sh
 cmake --preset mingw64     # 或者 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build        # 产物是 ./main.exe
-./main.exe                 # 在项目根目录跑：资源路径是相对的
+cmake --build build        # 产物是 ./follow.exe
+./follow.exe               # 在项目根目录跑：资源路径是相对的
 ```
 
 配置文件默认是 `src/config.ini`（[GKeyFile](https://docs.gtk.org/glib/struct.KeyFile.html) 格式，手写），命令面板里的 `Open Config File...` 会打开当前生效的配置文件，改完再用 `Reload config.ini` 生效。个人配置可放到 `src/config.local.ini`（存在时优先读取，已被 `.gitignore` 忽略，不会进入发布包），也可以用 `FOLLOW_CONFIG` 指定路径。最小示例：
@@ -83,6 +83,8 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 同样会解析（
 cmake --preset mingw64
 cmake --build build
 ```
+
+Windows 默认使用 GUI 子系统，不创建控制台窗口；调试时用 `-DFOLLOW_WIN_GUI=OFF`，或使用 `mingw64-debug` preset（默认关闭）。
 
 GitHub Actions（`.github/workflows/build.yml`）在 push / PR 时构建两个平台：
 
@@ -140,6 +142,13 @@ GitHub Actions（`.github/workflows/build.yml`）在 push / PR 时构建两个�
 
 - 左下角显示墙钟、累计收听时长、今日收听时长
 - 近 12 周热力图，颜色取自当前封面；按天记在 `<cache>/follow/stats.dat`，纯文本可改
+
+### 图标
+
+- `src/icons/logo.svg`：带浅色底的完整 logo（README / 展示用）
+- `src/icons/logo-mark.svg`：透明背景标记，用于窗口 / 任务栏 / Linux 桌面图标
+- `src/icons/logo.ico`：由 `logo-mark.svg` 生成，嵌入 Windows exe 与 NSIS 安装包
+- Linux 安装包会注册 `.desktop`（`Terminal=false`）和 hicolor 图标
 
 ### 歌曲详情（MusicBrainz）
 
@@ -209,7 +218,7 @@ src/core/{include,src}   libfollow_core.a   配置、缓存、设置、按键、
 src/net/{include,src}    libfollow_net.a    HTTP、B 站 / YouTube 解析、解析缓存、MusicBrainz
 src/music/{include,src}  libfollow_music.a   播放引擎、歌词、元数据状态机 + SQLite
 src/ui/{include,src}     libfollow_ui.a      主画面、歌曲墙、歌词层、动态背景、命令面板、详情页
-src/app/main.c           main.exe            生命周期、键盘分发、定时器
+src/app/main.c           follow.exe          生命周期、键盘分发、定时器
 src/include/follow/      每层的 umbrella 公开头（follow.h / follow_core.h / ...）
 src/icons/               品牌字标 + 项目 logo
 src/style/               GTK 外壳样式（窗口底色 + 极细的标题栏）
@@ -330,7 +339,7 @@ cmake --build build --target follow_ui
 ```sh
 cmake --preset mingw64 && cmake --build build      # 应用
 cmake --build build --target mcp                   # 需先 -DFOLLOW_BUILD_MCP=ON
-FOLLOW_UIDBG=1 ./main.exe          # 开调试通道（默认 7878）
+FOLLOW_UIDBG=1 ./follow.exe        # 开调试通道（默认 7878）
 ```
 
 MCP 服务已写进仓库的 `.pi/mcp.json`（server 名 `follow-ui`），pi 里 `/reload` 后生效；其他客户端当 stdio MCP 跑即可。
@@ -347,7 +356,7 @@ MCP 服务已写进仓库的 `.pi/mcp.json`（server 名 `follow-ui`），pi 里
 | `ui_perf` | `render_ms`、重画间隔、GSK 渲染器、GL 三层是否可用 |
 | `ui_screenshot` | 兜底：按 `max_width` 缩放后返回 PNG，默认整窗 720 宽 |
 | `ui_wait` | 等某个状态出现（画面出现某段文字 / 视图变了 / 播放状态变了） |
-| `ui_launch` | 带 `FOLLOW_UIDBG=1` 启动 `main.exe` 并等通道就绪 |
+| `ui_launch` | 带 `FOLLOW_UIDBG=1` 启动 `follow.exe` 并等通道就绪 |
 
 已知限制：`ui_screenshot` 走 GSK 的软件节点渲染，`GtkGLArea` 那几层（歌曲墙磁贴、歌词层）有时截不到——正好这些用 `ui_screen` / `ui_state` 看更准。
 

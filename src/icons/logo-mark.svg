@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="28 16 92 92" width="128" height="128">
+  <title>Follow mark</title>
+  <defs>
+    <linearGradient id="mp-top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A9C8DF"/><stop offset="1" stop-color="#8FB3CC"/>
+    </linearGradient>
+    <linearGradient id="mp-left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7498B5"/><stop offset="1" stop-color="#61869F"/>
+    </linearGradient>
+    <linearGradient id="mp-right" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#547A98"/><stop offset="1" stop-color="#456A88"/>
+    </linearGradient>
+  </defs>
+
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M58 34 L82 48 L58 62 L34 48 Z" fill="url(#mp-top)"/>
+    <path d="M34 48 L58 62 L58 90 L34 76 Z" fill="url(#mp-left)"/>
+    <path d="M82 48 L82 76 L58 90 L58 62 Z" fill="url(#mp-right)"/>
+
+    <path d="M58 34 L82 48 L82 76 L58 90 L34 76 L34 48 Z
+             M58 62 L82 48 M58 62 L34 48 M58 62 L58 90"
+          fill="none" stroke="#1F2B38" stroke-width="3"/>
+
+    <path d="M-8 0 C-6.5 0 -6 -3.5 -4 -3.5
+             C-1.5 -3.5 1.5 3.5 4 3.5
+             C6 3.5 6.5 0 8 0"
+          transform="matrix(1 -0.5833 0 1 70 69)"
+          fill="none" stroke="#5FD3D3" stroke-width="3"/>
+
+    <path d="M90 62 C93 62 93.5 48 97.5 48
+             C101.5 48 102.5 76 106.5 76
+             C110.5 76 111 62 114 62"
+          fill="none" stroke="#00A6A6" stroke-width="5"/>
+  </g>
+</svg>
