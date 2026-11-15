@@ -75,7 +75,7 @@
 
 #define SNAP_JUMP         3
 
-#define LINE_MAX          8
+#define LYRIC_LINE_MAX          8
 #define STACK_MAX         2
 #define ROW_MAX           LYRIC_SLOT_N
 
@@ -251,7 +251,7 @@ typedef struct {
     gboolean drawn;
 } Line;
 
-static Line g_lines[LINE_MAX];
+static Line g_lines[LYRIC_LINE_MAX];
 
 static const Lyrics *g_lyrics;
 static gssize  g_index = -1;
@@ -625,7 +625,7 @@ static void report_lines(void)
     uidbg_record_rect(g_geom.x, g_geom.top, g_geom.w, g_geom.height,
                       col_card, "lyric-area");
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         const Line *l = &g_lines[i];
 
         if (l->text == NULL || !l->drawn)
@@ -990,7 +990,7 @@ static gboolean sweeping(void)
     if (!g_pos_playing)
         return FALSE;
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         const Line *l = &g_lines[i];
 
         if (l->text != NULL && l->idx == g_focus_idx && l->char_ms != NULL &&
@@ -1003,7 +1003,7 @@ static gboolean sweeping(void)
 
 static gboolean anything_animating(void)
 {
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         if (line_animating(&g_lines[i]))
             return TRUE;
     }
@@ -1084,7 +1084,7 @@ static gboolean on_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     g_last_us = now;
     dt = CLAMP(dt, 1.0 / 240.0, 1.0 / 25.0);
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         line_step(&g_lines[i], dt);
 
         if (g_lines[i].text != NULL && g_lines[i].idx == g_focus_idx)
@@ -1133,7 +1133,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
 {
     int    w = gtk_widget_get_width(GTK_WIDGET(area));
     int    h = gtk_widget_get_height(GTK_WIDGET(area));
-    int    order[LINE_MAX];
+    int    order[LYRIC_LINE_MAX];
     int    n = 0;
 
     (void)context;
@@ -1169,7 +1169,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
         scissor_lyric();
     }
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         if (g_lines[i].text != NULL && g_lines[i].alpha > 0.002)
             order[n++] = i;
     }
@@ -1187,7 +1187,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
         order[j + 1] = cur;
     }
 
-    for (int i = 0; i < LINE_MAX; i++)
+    for (int i = 0; i < LYRIC_LINE_MAX; i++)
         g_lines[i].drawn = FALSE;
 
     for (int i = 0; i < n; i++) {
@@ -1394,14 +1394,14 @@ static Line *line_for_index(gssize idx, gboolean *fresh)
 {
     Line *slot = NULL;
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         if (g_lines[i].text != NULL && g_lines[i].idx == idx) {
             *fresh = FALSE;
             return &g_lines[i];
         }
     }
 
-    for (int i = 0; i < LINE_MAX && slot == NULL; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX && slot == NULL; i++) {
         if (g_lines[i].text == NULL)
             slot = &g_lines[i];
     }
@@ -1409,7 +1409,7 @@ static Line *line_for_index(gssize idx, gboolean *fresh)
     if (slot == NULL) {
         slot = &g_lines[0];
 
-        for (int i = 1; i < LINE_MAX; i++) {
+        for (int i = 1; i < LYRIC_LINE_MAX; i++) {
             if (g_lines[i].alpha < slot->alpha)
                 slot = &g_lines[i];
         }
@@ -1563,7 +1563,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
     g_pos_playing = geom->playing;
     g_anchor_no_focus = FALSE;
 
-    for (int i = 0; i < LINE_MAX; i++)
+    for (int i = 0; i < LYRIC_LINE_MAX; i++)
         g_lines[i].alive = FALSE;
 
     if (index < 0 && lyrics != NULL && lyrics->n_lines > 0) {
@@ -1582,7 +1582,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
         geom->height <= 1.0) {
         g_focus_idx = -1;
 
-        for (int i = 0; i < LINE_MAX; i++) {
+        for (int i = 0; i < LYRIC_LINE_MAX; i++) {
             if (g_lines[i].text != NULL) {
                 g_lines[i].alpha_t = 0.0;
                 g_lines[i].alive   = FALSE;
@@ -1691,7 +1691,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
         }
     }
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         Line *l = &g_lines[i];
         double alpha, scale, blur, tint;
 
@@ -1721,7 +1721,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
     }
 
     if (snap) {
-        for (int i = 0; i < LINE_MAX; i++) {
+        for (int i = 0; i < LYRIC_LINE_MAX; i++) {
             Line *l = &g_lines[i];
 
             if (l->text == NULL)
@@ -1739,7 +1739,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
         }
     }
 
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         if (g_lines[i].text != NULL && g_lines[i].alpha <= 0.003 &&
             g_lines[i].alpha_t <= 0.0) {
             line_rows_clear(&g_lines[i]);
@@ -1773,7 +1773,7 @@ void lyricgl_drag_state(gboolean dragging)
 
 void lyricgl_clear(void)
 {
-    for (int i = 0; i < LINE_MAX; i++) {
+    for (int i = 0; i < LYRIC_LINE_MAX; i++) {
         line_rows_clear(&g_lines[i]);
         g_clear_pointer(&g_lines[i].text, g_free);
         memset(&g_lines[i], 0, sizeof(g_lines[i]));

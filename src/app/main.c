@@ -128,12 +128,6 @@ static gboolean apply_window_edge_idle(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-static void on_window_realize_icon(GtkWidget *widget, gpointer data)
-{
-    (void)data;
-    appicon_apply(widget);
-}
-
 static void on_window_realize(GtkWidget *widget, gpointer data)
 {
     (void)data;
@@ -141,6 +135,12 @@ static void on_window_realize(GtkWidget *widget, gpointer data)
     apply_window_edge(widget);
 }
 #endif
+
+static void on_window_realize_icon(GtkWidget *widget, gpointer data)
+{
+    (void)data;
+    appicon_apply(widget);
+}
 
 static void track_listening_time(gboolean playing)
 {
