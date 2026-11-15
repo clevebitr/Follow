@@ -148,6 +148,9 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Collect assets
+        run: find artifacts -type f -exec cp {} . \;
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
@@ -163,7 +166,7 @@ jobs:
 
             配置、快捷键与平台支持见 README。
           files: |
-            artifacts/Follow-*-win64.exe
-            artifacts/Follow-*-win64-portable.zip
-            artifacts/Follow-*-linux-x86_64.tar.gz
+            Follow-*-win64.exe
+            Follow-*-win64-portable.zip
+            Follow-*-linux-x86_64.tar.gz
           fail_on_unmatched_files: true
