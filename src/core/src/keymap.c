@@ -84,6 +84,12 @@ static const struct {
     { "perf",         KEY_PERF },
     { "performance",  KEY_PERF },
     { "fps",          KEY_PERF },
+    { "details",      KEY_DETAILS },
+    { "detail",       KEY_DETAILS },
+    { "info",         KEY_DETAILS },
+    { "song_info",    KEY_DETAILS },
+    { "metadata",     KEY_DETAILS },
+    { "meta",         KEY_DETAILS },
 };
 
 /* 没写 [keys] 时的默认值，和 README / config.ini 保持一致 */
@@ -108,6 +114,7 @@ static const gchar *g_defaults[KEY_ACTION_COUNT] = {
     [KEY_BACK]         = "Escape",
     [KEY_QUIT]         = "q",
     [KEY_PERF]         = "F12",
+    [KEY_DETAILS]      = "i",
 };
 
 gint keymap_action_from_name(const gchar *name)

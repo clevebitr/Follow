@@ -14,6 +14,8 @@
 #include <math.h>
 #include <string.h>
 
+#include "cache.h"
+
 static APPconfig g_config;
 static gboolean  g_loaded = FALSE;
 
@@ -242,6 +244,8 @@ static void config_reset(void)
     g_free(g_config.cache_dir);
     g_free(g_config.user_agent);
     g_free(g_config.viz_effect);
+    g_free(g_config.metadata_db);
+    g_free(g_config.metadata_user_agent);
 
     for (int i = 0; i < KEY_ACTION_COUNT; i++)
         g_free(g_config.key_bind[i]);
@@ -269,6 +273,10 @@ static void config_reset(void)
     g_config.proxy       = NULL;         /* NULL = 直连 */
     g_config.http_timeout    = 0;        /* 0 = HTTP_DEFAULT_TIMEOUT */
     g_config.connect_timeout = 0;        /* 0 = HTTP_DEFAULT_CONNECT_TIMEOUT */
+    g_config.metadata_enabled = TRUE;
+    g_config.metadata_cover   = TRUE;
+    g_config.metadata_db      = NULL;    /* NULL = <cache>/follow/metadata.db */
+    g_config.metadata_user_agent = NULL; /* NULL = 项目专用 UA */
 
     memset(g_config.key_bind, 0, sizeof(g_config.key_bind));
 }
@@ -515,6 +523,23 @@ const APPconfig *config_load(const char *path)
         g_config.proxy = (proxy != NULL && *proxy != '\0') ? g_steal_pointer(&proxy) : NULL;
     }
 
+    /* [metadata]：公开数据库查询 + 本地库缓存 */
+    {
+        g_autofree gchar *db = config_get_string(kf, "metadata", "db");
+        g_autofree gchar *ua = config_get_string(kf, "metadata", "user_agent");
+
+        g_config.metadata_enabled = config_get_bool(kf, "metadata", "enabled", TRUE);
+        g_config.metadata_cover   = config_get_bool(kf, "metadata", "cover", TRUE);
+
+        g_free(g_config.metadata_db);
+        g_config.metadata_db =
+            (db != NULL && *db != '\0') ? g_steal_pointer(&db) : NULL;
+
+        g_free(g_config.metadata_user_agent);
+        g_config.metadata_user_agent =
+            (ua != NULL && *ua != '\0') ? g_steal_pointer(&ua) : NULL;
+    }
+
     /* [visualizer] 背景粒子：off / dust / warp / flow */
     {
         g_autofree gchar *effect = config_get_string(kf, "visualizer", "effect");
@@ -566,6 +591,8 @@ void config_free(void)
     g_free(g_config.user_agent);
     g_free(g_config.proxy);
     g_free(g_config.viz_effect);
+    g_free(g_config.metadata_db);
+    g_free(g_config.metadata_user_agent);
 
     for (int i = 0; i < KEY_ACTION_COUNT; i++)
         g_free(g_config.key_bind[i]);
@@ -603,6 +630,47 @@ const gchar *config_proxy(void)
     const APPconfig *cfg = config_get();
 
     return (cfg->proxy != NULL && *cfg->proxy != '\0') ? cfg->proxy : NULL;
+}
+
+gboolean config_metadata_enabled(void)
+{
+    return config_get()->metadata_enabled;
+}
+
+gboolean config_metadata_cover(void)
+{
+    return config_get()->metadata_cover;
+}
+
+const gchar *config_metadata_user_agent(void)
+{
+    /* MusicBrainz 要求 UA 里带应用名 / 版本 / 联系方式，所以这里不用
+     * [net] 那个浏览器 UA；[metadata] user_agent 可以覆盖。 */
+    const APPconfig *cfg = config_get();
+
+    if (cfg->metadata_user_agent != NULL && *cfg->metadata_user_agent != '\0')
+        return cfg->metadata_user_agent;
+
+    return METADATA_DEFAULT_USER_AGENT;
+}
+
+gchar *config_metadata_db_path(void)
+{
+    const APPconfig *cfg = config_get();
+
+    if (cfg->metadata_db != NULL && *cfg->metadata_db != '\0') {
+        if (g_str_has_prefix(cfg->metadata_db, "~/") ||
+            g_str_has_prefix(cfg->metadata_db, "~\\"))
+            return g_build_filename(g_get_home_dir(), cfg->metadata_db + 2, NULL);
+
+        return g_canonicalize_filename(cfg->metadata_db, NULL);
+    }
+
+    {
+        g_autofree gchar *dir = follow_cache_dir();
+
+        return g_build_filename(dir, "metadata.db", NULL);
+    }
 }
 
 const gchar *config_viz_effect(void)

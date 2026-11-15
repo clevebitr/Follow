@@ -4,7 +4,7 @@
 #  只把 DLL 拷进包里是不够的，GTK 还依赖下面这些「数据」，
 #  它们都是**环境变量无关**的：
 #    etc/ssl/certs/              CA 证书（libcurl 默认路径写死在 MSYS2 目录里，
-#                                src/core/http.c 会在启动时指到这份）
+#                                src/net/src/http.c 会在启动时指到这份）
 #    share/glib-2.0/schemas/     GSettings schema（glib 按 DLL 所在目录找）
 #    share/icons/Adwaita         GTK 标准图标
 #    lib/gdk-pixbuf-2.0/*/loaders 图片加载器（png/jpeg/svg/webp/...）+ loaders.cache
@@ -70,7 +70,7 @@ install(FILES "${FOLLOW_PIXBUF_CACHE_FILE}" DESTINATION "${FOLLOW_PIXBUF_RELDIR}
 
 # ------------------------------------------------------------ CA 证书 ------
 # libcurl 编译时把 CA 路径写死成 MSYS2 的安装位置，包里得带一份；
-# src/core/http.c: http_use_bundled_ca() 启动时把它指给 curl。
+# src/net/src/http.c: http_use_bundled_ca() 启动时把它指给 curl。
 install(DIRECTORY "${FOLLOW_MINGW_PREFIX}/etc/ssl/certs" DESTINATION etc/ssl
         FILES_MATCHING PATTERN "*.crt")
 install(FILES "${FOLLOW_MINGW_PREFIX}/etc/ssl/cert.pem" DESTINATION etc/ssl)

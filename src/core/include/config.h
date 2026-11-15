@@ -29,6 +29,11 @@
 #define HTTP_DEFAULT_TIMEOUT         15   /* 整次请求，秒 */
 #define HTTP_DEFAULT_CONNECT_TIMEOUT 5    /* 建连，秒 */
 
+/* [metadata] 没配时的 MusicBrainz UA。MB 要求 UA 里能联系到项目主页，
+ * 否则会被限速或直接 403。 */
+#define METADATA_DEFAULT_USER_AGENT \
+    "Follow/0.1.0 ( https://github.com/clevebitr/follow )"
+
 /* 一个曲目 = 配置里的一个 [audioN] 组。
  * link / pic / lrc 既可以是本地路径，也可以是 http(s) URL；
  * *_remote 是加载时算好的标志，省得每次再解析 scheme。
@@ -98,6 +103,12 @@ typedef struct {
     gint     http_timeout;      /* 整次请求超时，秒 */
     gint     connect_timeout;   /* 建连超时，秒 */
 
+    /* [metadata] 歌曲元数据（MusicBrainz）+ 本地 SQLite 缓存 */
+    gboolean metadata_enabled;  /* 关掉后详情页只读本地库，不发任何请求 */
+    gboolean metadata_cover;    /* 配置里没写 pic 时，用数据库封面 */
+    gchar   *metadata_db;       /* NULL = <cache>/follow/metadata.db */
+    gchar   *metadata_user_agent; /* NULL = 内置的项目 UA（MB 要求） */
+
     /* [audio1], [audio2] ... 按数字顺序排好的曲目表 */
     AudioTrack *tracks;
     gsize       n_tracks;
@@ -138,6 +149,17 @@ gint         config_http_connect_timeout(void);
 
 /* [net] proxy：没配置返回 NULL（直连）；空串也当没配 */
 const gchar *config_proxy(void);
+
+/* [metadata] 生效值：
+ *   config_metadata_enabled()   是否允许联网查询/补全（默认 TRUE）
+ *   config_metadata_cover()     没写 pic 时是否用数据库封面（默认 TRUE）
+ *   config_metadata_user_agent() 恒非 NULL
+ *   config_metadata_db_path()   返回新分配的 SQLite 路径
+ *                               （[metadata] db 或 <cache>/follow/metadata.db） */
+gboolean     config_metadata_enabled(void);
+gboolean     config_metadata_cover(void);
+const gchar *config_metadata_user_agent(void);
+gchar       *config_metadata_db_path(void);
 
 /* [visualizer] 的生效值：effect 恒非 NULL，particles / gain 恒为合理值 */
 const gchar *config_viz_effect(void);

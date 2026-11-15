@@ -18,8 +18,14 @@
 
 /* 封面 */
 
-/* 换成这张曲目的封面 */
+/* 换成这张曲目的封面。
+ * 优先级：配置里的 pic > 元数据数据库封面（[metadata] cover = true）。
+ * 元数据稍后才回来时，主循环会再调 cover_apply_metadata()。 */
 void cover_set(const AudioTrack *track);
+
+/* 当前曲目没有配置 pic 时，把数据库里已经缓存的封面装上。
+ * 已经有封面 / 关掉 [metadata] cover 时是空操作。 */
+void cover_apply_metadata(void);
 
 /* 丢掉当前封面和缩放缓存 */
 void cover_clear(void);

@@ -147,7 +147,21 @@ static int http_request(const char *url, const char *body, const char *headers,
         curl_easy_setopt(curl, CURLOPT_PROXY, config_proxy());
 
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, config_user_agent());
+
+    /* headers 里自己带了 User-Agent（MusicBrainz 要求项目专用 UA）时
+     * 不要再设 CURLOPT_USERAGENT，否则会发两条冲突的 UA 头。 */
+    {
+        gboolean ua_in_headers = FALSE;
+
+        if (headers != NULL) {
+            g_autofree gchar *lower = g_ascii_strdown(headers, -1);
+
+            ua_in_headers = strstr(lower, "user-agent:") != NULL;
+        }
+
+        if (!ua_in_headers)
+            curl_easy_setopt(curl, CURLOPT_USERAGENT, config_user_agent());
+    }
 
     if (body != NULL) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);

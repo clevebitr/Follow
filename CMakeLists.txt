@@ -40,6 +40,7 @@ set(FOLLOW_PKGS
     libcurl
     json-glib-1.0
     librsvg-2.0
+    sqlite3
     libavformat
     libavcodec
     libswresample
@@ -60,27 +61,11 @@ option(FOLLOW_INSTALL_ASSETS
 option(FOLLOW_BUILD_MCP
        "构建 crates/gtk-mcp-agent-capi 调试用 MCP（需要 cargo）" OFF)
 
-# ------------------------------------------------------------- 可执行文件 ---
-file(GLOB_RECURSE FOLLOW_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.c")
-
-add_executable(follow ${FOLLOW_SOURCES})
-
-target_include_directories(follow PRIVATE
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/src/core"
-    "${PROJECT_SOURCE_DIR}/src/ui")
-
-# src/models/miniaudio.h 当系统头文件引入：不报它自己的警告
-target_include_directories(follow SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/src/models")
-
-target_link_libraries(follow PRIVATE PkgConfig::FOLLOW_DEPS)
+# ------------------------------------------------------------- 模块 / 可执行文件 ---
+# 源码树见 src/CMakeLists.txt：core → net → music → ui → app，各自独立静态库。
+add_subdirectory(src)
 
 target_compile_definitions(follow PRIVATE FOLLOW_APP_ID="${FOLLOW_APP_ID}")
-target_compile_options(follow PRIVATE -Wall -Wextra)
-
-# miniaudio 里的原子操作在 -O2 + 内联时会被误报成 stringop-overflow
-set_source_files_properties("${PROJECT_SOURCE_DIR}/src/core/media.c"
-    PROPERTIES COMPILE_OPTIONS "-Wno-stringop-overflow")
 
 set_target_properties(follow PROPERTIES OUTPUT_NAME "${FOLLOW_EXE_NAME}")
 

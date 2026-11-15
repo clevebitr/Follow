@@ -48,6 +48,7 @@ typedef enum {
     KEY_BACK,
     KEY_QUIT,
     KEY_PERF,
+    KEY_DETAILS,
     KEY_ACTION_COUNT
 } KeyAction;
 

@@ -12,23 +12,25 @@
 
 ## 开始使用
 
-需要 GTK 4、libepoxy、FFmpeg、libcurl、JSON-GLib、libqrencode、librsvg，以及一个 C 编译器 + CMake（≥ 3.25）。
+需要 GTK 4、libepoxy、FFmpeg、libcurl、JSON-GLib、SQLite、libqrencode、librsvg，以及一个 C 编译器 + CMake（≥ 3.25）。
 
 ```sh
 # MSYS2 / MinGW-w64
 pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-gtk4 \
           mingw-w64-x86_64-libepoxy mingw-w64-x86_64-libqrencode \
-          mingw-w64-x86_64-curl
+          mingw-w64-x86_64-curl mingw-w64-x86_64-json-glib \
+          mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-ffmpeg
 
 # MSYS2 / UCRT64
 pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-gtk4 \
           mingw-w64-ucrt-x86_64-libepoxy mingw-w64-ucrt-x86_64-qrencode \
-          mingw-w64-ucrt-x86_64-curl
+          mingw-w64-ucrt-x86_64-curl mingw-w64-ucrt-x86_64-json-glib \
+          mingw-w64-ucrt-x86_64-sqlite3 mingw-w64-ucrt-x86_64-ffmpeg
 
 # Debian / Ubuntu
 sudo apt install build-essential pkg-config libgtk-4-dev libepoxy-dev \
-     libqrencode-dev libcurl4-openssl-dev libjson-glib-dev librsvg2-dev \
-     libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
+     libqrencode-dev libcurl4-openssl-dev libjson-glib-dev libsqlite3-dev \
+     librsvg2-dev libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
 ```
 
 ```sh
@@ -68,7 +70,7 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 同样会解析（
 `[audioN]` 按 N 排序就是播放列表，任何一项缺失都会回落到默认值，ini 写坏了也能启动。**完整键说明见下方「配置项」**。
 
 > YouTube 按出口 IP 判人机验证：机房 IP / 公共代理常被挡，`[net] proxy` 对 YouTube 基本必填。
-> 另外 googlevideo 只接受定长 Range 请求，YouTube 音源改由 `src/core/httpstream.c` 用 libcurl 分块拉流再喂给解码器（seek 仍然正确），这是实现细节，不用管。
+> 另外 googlevideo 只接受定长 Range 请求，YouTube 音源改由 `src/net/src/httpstream.c` 用 libcurl 分块拉流再喂给解码器（seek 仍然正确），这是实现细节，不用管。
 
 ## 构建与打包（CMake + CPack）
 
@@ -129,6 +131,16 @@ cmake --build build
 - 左下角显示墙钟、累计收听时长、今日收听时长
 - 近 12 周热力图，颜色取自当前封面；按天记在 `<cache>/follow/stats.dat`，纯文本可改
 
+### 歌曲详情（MusicBrainz）
+
+- `I` 打开整屏详情页：封面、曲名、艺人、专辑、发行时间、厂牌、目录号、条码、曲序 / 曲长、标签，以及 **Recording MBID / Release MBID**
+- 首次遇到一首歌时后台查询 MusicBrainz，弹出候选列表由你指认（`↑` `↓` 选、`Enter` 确认）；即使只有一个候选也要确认一次
+- 指认结果 + 完整元数据写进本地 SQLite（`<cache>/follow/metadata.db`），之后打开详情页**不再发任何请求**，断网也能看
+- 候选列表也会落库：网络失败时仍可离线指认
+- `R` 认错后重新识别；`Esc` / `I` 关闭
+- 封面优先级：`config.ini` 里写的 `pic` **永远优先**；没写 `pic` 时用 Cover Art Archive 封面（同样落盘缓存），`[metadata] cover = false` 可关掉
+- MusicBrainz 限速 1 req/s，客户端做了节流 + 503 退避重试；`[metadata] enabled = false` 可完全禁止联网
+
 ### 命令面板
 
 `Ctrl+Shift+P` 打开命令框。
@@ -148,6 +160,7 @@ cmake --build build
 | `[` / `]` | 歌词提前 / 延后 250 ms |
 | `\` | 歌词偏移恢复成 ini 里的值 |
 | `F` / `F11` | 全屏 |
+| `I` | 歌曲详情页（MBID / 专辑 / 发行时间；首次需指认） |
 | `Tab` | 打开 / 关闭歌曲墙 |
 | `F1` | 快捷键页 |
 | `F12` | 性能检测层 |
@@ -168,28 +181,52 @@ cmake --build build
 | OpenGL 3.3 + libepoxy | 墙层 textured quad、相机平移 / 选中缩放 / 压暗在 GPU 上合成 |
 | miniaudio | 音频输出（已内置，header-only） |
 | FFmpeg | 本地 / 网络音频解码 |
-| libcurl + JSON-GLib | 网络请求与接口解析（B 站 / YouTube / 歌词源）、YouTube 分块拉流 |
+| libcurl + JSON-GLib | 网络请求与接口解析（B 站 / YouTube / 歌词源 / MusicBrainz）、YouTube 分块拉流 |
+| SQLite | 本地元数据库（`<cache>/follow/metadata.db`） |
 | libqrencode + librsvg | 二维码与品牌矢量图标 |
 | 自带 FFT | 可视化用的 1024 点 radix-2 FFT，不依赖 FFTW / libvisual |
 
 ## 目录结构
 
+源码按「只允许单向依赖」分成四个独立静态库 + 一个薄薄的 app 层：
+
 ```
-src/core/    播放器内核：配置、解码与输出、音源解析、歌词、封面取色、收听统计
-src/ui/      画面：版面计算、cairo 绘制、动态背景 / 粒子、歌曲墙、二维码、快捷键页
-src/icons/   品牌字标 + 项目 logo
-src/style/   GTK 外壳样式（窗口底色 + 极细的标题栏）
-src/assets/  示例音频与封面（不入库，按 config.ini 放自己的文件）
-src/models/  内置的 miniaudio.h
-crates/      gtk-mcp-agent-capi：把 uidbg 调试通道包成 MCP 工具（cmake --build build --target mcp）
+app ──► ui ──► music ──► net ──► core
 ```
+
+```
+src/core/{include,src}   libfollow_core.a   配置、缓存、设置、按键、统计、取色、纹理、平台
+src/net/{include,src}    libfollow_net.a    HTTP、B 站 / YouTube 解析、解析缓存、MusicBrainz
+src/music/{include,src}  libfollow_music.a   播放引擎、歌词、元数据状态机 + SQLite
+src/ui/{include,src}     libfollow_ui.a      主画面、歌曲墙、歌词层、动态背景、命令面板、详情页
+src/app/main.c           main.exe            生命周期、键盘分发、定时器
+src/include/follow/      每层的 umbrella 公开头（follow.h / follow_core.h / ...）
+src/icons/               品牌字标 + 项目 logo
+src/style/               GTK 外壳样式（窗口底色 + 极细的标题栏）
+src/assets/              示例音频与封面（不入库，按 config.ini 放自己的文件）
+src/models/              内置的 miniaudio.h
+crates/                  gtk-mcp-agent-capi：把 uidbg 调试通道包成 MCP 工具
+```
+
+每个模块的公开头在 `<module>/include/` 下，通过 `target_link_libraries(... follow::core)` 自动传播；实现放在 `<module>/src/`，其它模块不应该 include。
+
+只编译某一层（不链接主程序）：
+
+```sh
+cmake --build build --target follow_core
+cmake --build build --target follow_net
+cmake --build build --target follow_music
+cmake --build build --target follow_ui
+```
+
+新增功能时按依赖方向挑层：只处理数据/协议放 `net`，和「歌」有关的业务状态放 `music`，GTK / cairo 放 `ui`，`app` 只做接线。`src/ui/include/details.h` + `src/music/include/metadata.h` 可以作为一条完整的新增链路参考。
 
 ## 免责声明 / Disclaimer
 
 **本项目仅供学习与技术研究使用。**
 
 - 作者**不提供、不托管、不分发**任何音视频内容。播放的内容全部由使用者自己提供或指定，版权归各自权利人所有。
-- `src/core/bilibili.c` 使用 B 站网页端的**非公开接口**并附带 Referer 头来获取音频流地址；`src/core/youtube.c` 调用 YouTube 的 InnerTube 接口并伪装成官方客户端；`src/core/lyricsrc.c` 同理访问网易云 / QQ 音乐。这些做法**可能违反对应平台的服务条款**，接口也可能随时失效。**请仅用于个人学习，不要用于分发、转售或商业用途，也不要下载 / 保存 / 二次分发内容。**
+- `src/net/bilibili.c` 使用 B 站网页端的**非公开接口**并附带 Referer 头来获取音频流地址；`src/net/youtube.c` 调用 YouTube 的 InnerTube 接口并伪装成官方客户端；`src/music/lyricsrc.c` 同理访问网易云 / QQ 音乐；`src/net/musicbrainz.c` 使用 MusicBrainz / Cover Art Archive 的公开 API。这些做法**可能违反对应平台的服务条款**，接口也可能随时失效。**请仅用于个人学习，不要用于分发、转售或商业用途，也不要下载 / 保存 / 二次分发内容。**
 - 若需要合规使用，请走各平台官方开放接口，或直接使用你有权访问的音频直链（`http(s)` / HLS）——这条路径不涉及任何平台。
 - 使用者须自行遵守所在地法律法规与平台条款，**因使用本项目产生的一切后果由使用者自行承担**。
 
@@ -206,6 +243,7 @@ crates/      gtk-mcp-agent-capi：把 uidbg 调试通道包成 MCP 工具（cmak
 | `cache` | `dir` / `resolve_ttl` / `cover_max_mb` | 缓存目录（默认 `<用户缓存>/follow`）；解析缓存时长（秒，默认 2700，0 = 关闭）；封面缓存上限（MB，默认 128） |
 | `ui` | `animations` / `backdrop_fps` | 动效总开关；动态背景刷新率（10–240，默认 30） |
 | `net` | `user_agent` / `timeout` / `connect_timeout` / `proxy` | UA 留空用内置浏览器 UA，超时单位秒，`proxy` 同时作用于 curl 与 FFmpeg |
+| `metadata` | `enabled` / `cover` / `db` / `user_agent` | MusicBrainz 查询开关（默认 true）；没写 `pic` 时是否用数据库封面（默认 true）；元数据库路径（默认 `<cache>/follow/metadata.db`）；覆盖 MusicBrainz UA（默认带项目主页） |
 | `visualizer` | `effect` / `particles` / `gain` | `off` / `dust`（默认）/ `warp` / `flow`，粒子数 20–400，灵敏度 0.2–4.0 |
 | `keys` | 动作名 | 按键绑定，值可写多个键（逗号 / 竖线分隔），`off` / `none` 解绑；键名用 GDK 名字，支持 `ctrl+` / `alt+` / `shift+` / `super+` |
 | `audioN` | `link` | **必填**，空的组会被跳过 |

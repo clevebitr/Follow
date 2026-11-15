@@ -36,6 +36,7 @@ void help_draw(cairo_t *cr, double width, double height)
         { KEY_LYRIC_EARLIER, "歌词整体提前 250 ms（视频带片头时用）" },
         { KEY_LYRIC_LATER,   "歌词整体延后 250 ms" },
         { KEY_LYRIC_RESET,   "歌词偏移恢复成 ini 里的值" },
+        { KEY_DETAILS,      "歌曲详情（MBID / 专辑 / 发行时间，首次需指认）" },
         { KEY_PLAYLIST,     "打开 / 关闭播放列表" },
         { KEY_FULLSCREEN,   "全屏切换" },
         { KEY_HELP,         "打开 / 关闭这一页" },

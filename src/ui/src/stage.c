@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include "cover.h"
+#include "details.h"
 #include "covercache.h"
 #include "help.h"
 #include "layout.h"
@@ -693,6 +694,14 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
 
     perf_phase_begin(PERF_PHASE_STAGE);
     uidbg_frame_begin();
+
+    /* 歌曲详情页：整屏页面，盖掉主画面（背景仍由 backdrop 那层提供） */
+    if (details_is_open()) {
+        details_draw(cr, (double)width, (double)height);
+        uidbg_frame_end();
+        perf_phase_end(PERF_PHASE_STAGE);
+        return;
+    }
 
     /* 播放列表是全屏页：盖掉 stage，只留下面那层动态背景 */
     if (playlist_is_open()) {

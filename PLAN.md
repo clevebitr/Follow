@@ -14,8 +14,11 @@ auto-breakpoint: false
 - [x] M3 — 性能检测层 + 修掉 fx_lyric 常驻重绘（详见 #21）
 - [ ] M4 — 主画布换纹理节点，消掉每帧 cairo 重生（详见 #22）
 - [x] M5 — 构建/打包迁 CMake + CPack（详见 #1）
+- [x] M6 — 分层重构：core/net/music/ui 静态库（#1）
+- [x] M7 — 元数据后端与 SQLite 缓存（#2）
+- [x] M8 — 歌曲详情页与首次指认（#3）
 
 ## Current: M4 — 主画布换纹理节点，消掉每帧 cairo 重生（详见 #22）
 
-goal: F12 面板口径 + 背景帧率可配（#22/#23）
-breakpoint: 未提交：M5+Open Config File；M4 纹理化待做
+goal: 主画布纹理化，消掉每帧 cairo 重生
+breakpoint: 元数据/详情页已完成（M6-M8）；M4 未开始，改动未提交

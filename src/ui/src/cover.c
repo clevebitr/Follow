@@ -19,6 +19,7 @@
 #include "backdrop.h"
 #include "cache.h"
 #include "http.h"
+#include "metadata.h"
 #include "texture.h"
 #include "ui.h"
 
@@ -226,6 +227,55 @@ void cover_set(const AudioTrack *track)
     install_pixbuf(pixbuf);
     g_object_unref(pixbuf);
     g_free(path);
+}
+
+void cover_apply_metadata(void)
+{
+    const APPconfig  *cfg   = config_get();
+    gint              index = app.track >= 0 ? app.track : 0;
+    const AudioTrack *track = config_track_at(cfg, (gsize)index);
+    const gchar      *path;
+    GdkPixbuf        *pixbuf;
+
+    if (!config_metadata_cover())
+        return;
+
+    /* 用户在 ini 里指认了封面：永远优先，哪怕数据库也有 */
+    if (track != NULL && track->pic != NULL && *track->pic != '\0')
+        return;
+
+    if (app.cover != NULL)
+        return;
+
+    /* 元数据可能还停在上一首（切歌顺序：player 先换封面，tick 后加载元数据）。
+     * 先让状态机切到这首：命中本地库时这一步是同步的，封面可以立刻装上。 */
+    {
+        g_autofree gchar *key = metadata_track_key(track);
+
+        if (metadata_state() != META_STATE_READY ||
+            g_strcmp0(key, metadata_current_key()) != 0) {
+            if (track != NULL)
+                metadata_load_track(track);
+
+            if (metadata_state() != META_STATE_READY ||
+                g_strcmp0(key, metadata_current_key()) != 0)
+                return;
+        }
+    }
+
+    path = metadata_cover_path();
+    if (path == NULL || *path == '\0' || !g_file_test(path, G_FILE_TEST_EXISTS))
+        return;
+
+    pixbuf = gdk_pixbuf_new_from_file(path, NULL);
+    if (pixbuf == NULL) {
+        g_warning("cover: cannot load metadata cover %s", path);
+        return;
+    }
+
+    install_pixbuf(pixbuf);
+    g_object_unref(pixbuf);
+    g_message("cover: metadata cover %s", path);
 }
 
 cairo_surface_t *cover_base(void)

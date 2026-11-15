@@ -47,11 +47,13 @@
 #include "config.h"
 #include "cover.h"
 #include "covercache.h"
+#include "details.h"
 #include "http.h"
 #include "keymap.h"
 #include "lyricgl.h"
 #include "lyricview.h"
 #include "media.h"
+#include "metadata.h"
 #include "cmdbox.h"
 #include "perf.h"
 #include "player.h"
@@ -276,7 +278,8 @@ void ui_sync_layers(void)
     /* 歌词 GPU 层跟着主画布：墙打开 / 关闭、帮助页都要同步 */
     if (app.lyricgl != NULL)
         gtk_widget_set_visible(app.lyricgl,
-                               !wall_open && !app.help && !gpu_wall);
+                               !wall_open && !app.help && !gpu_wall &&
+                               !details_is_open());
 
     /* GL 墙的表头 / 底栏在 chrome 层；cairo 回退时 chrome 由画布一起画。 */
     if (app.chrome != NULL)
@@ -342,6 +345,33 @@ static gboolean on_tick(gpointer data)
     }
 
     lyricview_sync(position);
+
+    /* 元数据：切歌时加载（本地库命中就同步完成），状态变化时刷新详情页和封面 */
+    {
+        static gint  meta_track = -2;
+        static guint meta_ver   = 0;
+        gint          shown = app.track >= 0 ? app.track : 0;
+        const AudioTrack *track = config_track_at(config_get(), (gsize)shown);
+
+        if (shown != meta_track) {
+            meta_track = shown;
+            metadata_load_track(track);
+            meta_ver = metadata_version();
+
+            /* 本地库命中时元数据是同步就绪的：立刻把封面补上 */
+            cover_apply_metadata();
+
+            if (details_is_open())
+                ui_request_redraw();
+        } else if (metadata_version() != meta_ver) {
+            meta_ver = metadata_version();
+
+            if (details_is_open())
+                ui_request_redraw();
+
+            cover_apply_metadata();
+        }
+    }
 
     if (app.dirty) {
         app.dirty = FALSE;
@@ -530,6 +560,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         }
     }
 
+    /* 详情页：自己的选择 / 重搜 / 关闭逻辑，其他键一律吞掉 */
+    if (details_is_open())
+        return details_key(keyval, state);
+
     /* 快捷键页：只认帮助 / 返回 / 退出，其他键一律吞掉 */
     if (app.help) {
         if (keymap_match(KEY_HELP, keyval, state) ||
@@ -540,6 +574,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
             ui_sync_layers();
         } else if (keymap_match(KEY_QUIT, keyval, state)) {
             gtk_window_close(GTK_WINDOW(app.window));
+        } else if (keymap_match(KEY_DETAILS, keyval, state)) {
+            app.help = FALSE;
+            details_open();
+            ui_sync_layers();
         } else if (keymap_match(KEY_PLAYLIST, keyval, state)) {
             app.help = FALSE;
             app.chrome_dirty = TRUE;
@@ -555,6 +593,13 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         if (keymap_match(KEY_PLAYLIST, keyval, state) ||
             keymap_match(KEY_BACK, keyval, state)) {
             playlist_close();
+            return TRUE;
+        }
+
+        if (keymap_match(KEY_DETAILS, keyval, state)) {
+            playlist_close();
+            details_open();
+            ui_sync_layers();
             return TRUE;
         }
 
@@ -671,6 +716,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     }
     if (keymap_match(KEY_FULLSCREEN, keyval, state)) {
         ui_toggle_fullscreen();
+        return TRUE;
+    }
+    if (keymap_match(KEY_DETAILS, keyval, state)) {
+        details_open();
         return TRUE;
     }
     if (keymap_match(KEY_PLAYLIST, keyval, state)) {
@@ -1351,9 +1400,11 @@ static void startup(GtkApplication *app_, gpointer user_data)
     }
 
     config_load(CONFIG_PATH);
+    metadata_init();
     settings_load();
 
     cache_prune_prefix("cover", config_cover_max_bytes());
+    cache_prune_prefix("metacover", config_cover_max_bytes());
     resolvecache_prune();
 
     g_message("cache: cover %.1f MB / limit %.0f MB",
@@ -1373,9 +1424,10 @@ static void startup(GtkApplication *app_, gpointer user_data)
 
     g_message("visualizer: %s, %d particle(s), gain %.2f",
               viz_effect_name(), config_viz_particles(), config_viz_gain());
-    g_message("keys: play=%s  next=%s  playlist=%s  help=%s",
+    g_message("keys: play=%s  next=%s  playlist=%s  details=%s  help=%s",
               keymap_label(KEY_PLAY_PAUSE), keymap_label(KEY_NEXT),
-              keymap_label(KEY_PLAYLIST), keymap_label(KEY_HELP));
+              keymap_label(KEY_PLAYLIST), keymap_label(KEY_DETAILS),
+              keymap_label(KEY_HELP));
 
     /* [net] proxy 同时也交给 FFmpeg：curl 走 CURLOPT_PROXY，
      * 解码器（avformat 的 http）只认环境变量，两边都指到同一个代理。 */
@@ -1434,6 +1486,8 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
 
     perf_clear();
     uidbg_stop();
+
+    metadata_shutdown();
 
     stats_save(&app.stats);
     stats_clear(&app.stats);
