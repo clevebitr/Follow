@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/15
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "metadata.h"
@@ -21,23 +22,8 @@
 #include "metadb.h"
 #include "musicbrainz.h"
 
-/* ---------------------------------------------------------------------------
- *  元数据状态机
- *
- *   UI 线程                     工作线程
- *   ────────────────────────    ────────────────────────────
- *   metadata_load_track()
- *     ├─ SQLite 命中 → READY
- *     ├─ 候选缓存   → PICK（离线也能指认）
- *     └─ 网络搜索   ─────────►   mb_search_recordings()
- *                                   │ g_idle_add
- *   PICK → 用户 Enter            ◄──┘
- *     └─ 拉详情     ─────────►   mb_fetch_recording() + 封面下载
- *                                   │ g_idle_add
- *   READY（写 SQLite）           ◄──┘
- *
- * 所有 M 里的字段只在 UI 线程读写；工作线程只碰自己的 MetaJob。
- * ------------------------------------------------------------------------- */
+/* 元数据状态机：UI 线程维护状态，工作线程执行网络请求。
+ * 完成结果进入互斥队列，由 60ms 定时器在 UI 线程合并。 */
 
 typedef enum {
     META_JOB_SEARCH = 0,
@@ -52,19 +38,16 @@ typedef struct {
     gchar      *title;
     gchar      *artist;
     gchar      *mbid;
-    gchar      *url;          /* COVER：封面地址 */
+    gchar      *url;
 
-    GPtrArray  *candidates;   /* SEARCH 结果 */
-    TrackMeta  *meta;         /* FETCH 结果 */
-    gchar      *cover_path;   /* COVER 结果 */
+    GPtrArray  *candidates;
+    TrackMeta  *meta;
+    gchar      *cover_path;
     gchar      *error;
 } MetaJob;
 
-/* 完成的工作线程结果队列。
- *
- * 不用 g_idle_add：详情页打开后 GTK 会留下一个长期 ready 的默认优先级
- * source，DEFAULT_IDLE 优先级的回调会被饿死（定时器还在跑，idle 不跑）。
- * 这里改成「工作线程入队 + 60ms 定时器在 UI 线程取」，只依赖定时器。 */
+/* 不使用 g_idle_add：详情页打开后 GTK 会占用默认上下文，
+ * DEFAULT_IDLE 回调可能长期得不到调度，因此改用定时器轮询队列。 */
 static GMutex  g_done_mutex;
 static GQueue  g_done_queue = G_QUEUE_INIT;
 static guint   g_poll_id;
@@ -89,8 +72,6 @@ static struct {
 static gboolean meta_poll(gpointer data);
 static void     meta_job_free(MetaJob *job);
 
-/* ------------------------------------------------------------ 生命周期 --- */
-
 void metadata_init(void)
 {
     if (M.initialized)
@@ -110,7 +91,7 @@ void metadata_shutdown(void)
     if (!M.initialized)
         return;
 
-    M.gen++;                    /* 让还在飞的工作线程结果作废 */
+    M.gen++;                    /* 作废进行中的结果。 */
     M.shutting_down = TRUE;
 
     g_clear_pointer(&M.key, g_free);
@@ -128,7 +109,6 @@ void metadata_shutdown(void)
         g_poll_id = 0;
     }
 
-    /* 队列里没处理的结果直接释放 */
     g_mutex_lock(&g_done_mutex);
     for (GList *it = g_done_queue.head; it != NULL; it = it->next)
         meta_job_free(it->data);
@@ -200,8 +180,6 @@ void meta_record_free(TrackMeta *meta)
     g_free(meta);
 }
 
-/* --------------------------------------------------------------- 查询 --- */
-
 MetaState metadata_state(void)
 {
     return M.state;
@@ -247,8 +225,6 @@ const gchar *metadata_cover_url(void)
     return M.meta != NULL ? M.meta->cover_url : NULL;
 }
 
-/* --------------------------------------------------------------- 状态 --- */
-
 static void state_set_error(const gchar *message)
 {
     g_free(M.error);
@@ -276,8 +252,6 @@ static void clear_meta(void)
 {
     g_clear_pointer(&M.meta, meta_record_free);
 }
-
-/* --------------------------------------------------------- 工作线程 ------ */
 
 static void meta_job_free(MetaJob *job)
 {
@@ -321,7 +295,7 @@ static GPtrArray *convert_candidates(GPtrArray *mb_list)
     return out;
 }
 
-/* 封面下载：<cache>/metacover-<md5(url)>.img，命中就不重复拉。 */
+/* 封面缓存：<cache>/metacover-<md5>.img。 */
 static gchar *cover_download(const gchar *url)
 {
     g_autofree gchar *path = NULL;
@@ -408,8 +382,7 @@ static gpointer meta_worker(gpointer data)
             mb_record_free(record);
         }
     } else {
-        /* 封面单独下：CAA 会重定向到 archive.org，慢的时候十几秒，
-         * 不能挡住详情页显示。 */
+        /* 封面异步下载，避免阻塞详情页。 */
         job->cover_path = cover_download(job->url);
     }
 
@@ -431,7 +404,6 @@ static gpointer meta_worker(gpointer data)
     return NULL;
 }
 
-/* UI 线程：把已经完成的结果逐个合并进状态机 */
 static gboolean meta_poll(gpointer data)
 {
     MetaJob *job = NULL;
@@ -537,7 +509,7 @@ static gboolean meta_job_done(gpointer data)
     g_debug("metadata: job done (kind=%d gen=%u/%u)",
             (int)job->kind, job->gen, M.gen);
 
-    /* 曲目切走了 / 重新搜索了：结果直接丢掉 */
+    /* 丢弃过期结果。 */
     if (job->gen != M.gen || M.key == NULL ||
         g_strcmp0(job->key, M.key) != 0) {
         meta_job_free(job);
@@ -558,8 +530,7 @@ static gboolean meta_job_done(gpointer data)
 
             metadb_put_candidates(M.key, M.candidates);
 
-            /* 第一次识别必须由用户指认：即使只有一个候选也让人看一眼再 Enter，
-             * 避免搜索条件太宽时把错的录音悄悄存下来。 */
+            /* 首次识别必须由用户确认，即使只有一个候选。 */
             M.selected = 0;
             state_bump(META_STATE_PICK);
             g_message("metadata: %u candidate(s), waiting for user",
@@ -584,7 +555,7 @@ static gboolean meta_job_done(gpointer data)
                       M.meta->album != NULL ? M.meta->album : "-",
                       M.meta->recording_mbid != NULL ? M.meta->recording_mbid : "-");
 
-            /* 详情先上屏，封面在后台继续下 */
+            /* 详情先进入 READY，封面随后补写。 */
             start_cover(M.meta->cover_url);
         }
     } else {
@@ -606,8 +577,6 @@ static gboolean meta_job_done(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-/* --------------------------------------------------------------- 入口 --- */
-
 void metadata_load_track(const AudioTrack *track)
 {
     g_autofree gchar *key = metadata_track_key(track);
@@ -627,8 +596,7 @@ void metadata_load_track(const AudioTrack *track)
         return;
     }
 
-    /* 同一首歌：已经出结果 / 正在查 / 上次失败，都不用每个 tick 重来。
-     * 重新查询走 metadata_research()。 */
+    /* 同一曲目已有结果时直接返回；重新查询调用 metadata_research()。 */
     if (g_strcmp0(key, M.key) == 0 && M.state != META_STATE_IDLE)
         return;
 
@@ -654,12 +622,12 @@ void metadata_load_track(const AudioTrack *track)
     M.want_cover = config_metadata_cover() &&
                    (track->pic == NULL || *track->pic == '\0');
 
-    /* 1) 本地库：之后打开详情页不再发任何请求 */
+    /* 本地库命中。 */
     if (metadb_get(M.key, &M.meta)) {
         g_message("metadata: cache hit %s", M.key);
         state_bump(META_STATE_READY);
 
-        /* 上次可能因为配置里有 pic 没下封面；现在需要了就补一次 */
+        /* 需要封面但本地缺失时补下载。 */
         if (M.want_cover && M.meta->cover_url != NULL &&
             (M.meta->cover_path == NULL ||
              !g_file_test(M.meta->cover_path, G_FILE_TEST_EXISTS)))
@@ -668,7 +636,7 @@ void metadata_load_track(const AudioTrack *track)
         return;
     }
 
-    /* 2) 上次搜索的候选还在：离线也能指认 */
+    /* 使用候选缓存。 */
     M.candidates = metadb_get_candidates(M.key);
 
     if (M.candidates != NULL) {
@@ -676,7 +644,7 @@ void metadata_load_track(const AudioTrack *track)
         return;
     }
 
-    /* 3) 联网搜索（用户关掉了就只报错，不发请求） */
+    /* 联网搜索；配置关闭时直接报错。 */
     if (!config_metadata_enabled()) {
         state_set_error("元数据查询已关闭（[metadata] enabled = false）");
         return;

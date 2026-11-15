@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/15
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "details.h"
@@ -21,7 +22,6 @@
 #include "theme.h"
 #include "ui.h"
 
-/* 页面状态：只影响绘制，真正的数据在 metadata 状态机里 */
 static gboolean g_open;
 
 void details_open(void)
@@ -29,7 +29,7 @@ void details_open(void)
     if (g_open)
         return;
 
-    /* 保证打开的第一帧就是当前曲目的数据（切歌后 100ms 内按 I 也不会串曲） */
+    /* 打开前同步当前曲目的元数据与封面。 */
     {
         gint index = app.track >= 0 ? app.track : 0;
 
@@ -63,14 +63,12 @@ gboolean details_is_open(void)
     return g_open;
 }
 
-/* ---------------------------------------------------------------- 工具 --- */
-
 static const gchar *or_dash(const gchar *text)
 {
     return (text != NULL && *text != '\0') ? text : "—";
 }
 
-/* MB 的录音时长（毫秒）→ "4:12" */
+/* 毫秒 → m:ss */
 static gchar *format_ms(gint ms)
 {
     gint total;
@@ -94,7 +92,7 @@ static gchar *format_track(gint number, gint count)
     return g_strdup_printf("%d / %d", number, count);
 }
 
-/* 封面种子色，压到适合做强调色的亮度区间 */
+/* 种子色，限制为强调色亮度。 */
 static Rgba accent(double alpha)
 {
     const Palette *p = &app.palette;
@@ -134,7 +132,6 @@ static double field_height(double label_px, double value_px)
     return label_px * 1.5 + value_px * 1.35;
 }
 
-/* 单行右对齐（text_draw 只有左 / 居中两种对齐） */
 static void text_draw_right(cairo_t *cr, const gchar *text,
                             const TextStyle *style, double right_x, double y)
 {
@@ -142,8 +139,6 @@ static void text_draw_right(cairo_t *cr, const gchar *text,
 
     text_draw(cr, text, style, right_x - w, y, TEXT_LEFT, 0.0);
 }
-
-/* ------------------------------------------------------------ 绘制分块 --- */
 
 typedef struct {
     double pad;
@@ -169,7 +164,6 @@ static void draw_header(cairo_t *cr, const Geom *G, double w, const gchar *hint)
                     w - G->pad, G->head_y);
 }
 
-/* 右列标题：曲名 / 艺人 / 专辑行。返回下一块可用的 y。 */
 static double draw_title(cairo_t *cr, const Geom *G, const gchar *title,
                          const gchar *artist, const gchar *album,
                          const gchar *date, double h)
@@ -218,7 +212,6 @@ static void draw_divider(cairo_t *cr, const Geom *G, double y)
     cairo_stroke(cr);
 }
 
-/* READY：字段网格 */
 static void draw_fields(cairo_t *cr, const Geom *G, const TrackMeta *meta,
                         double y, double h)
 {
@@ -232,7 +225,6 @@ static void draw_fields(cairo_t *cr, const Geom *G, const TrackMeta *meta,
     g_autofree gchar *length = format_ms(meta->duration_ms);
     Rgba    mbid_color = accent(0.92);
 
-    /* 两行 MBID 用整行宽度，UUID 不会被省略 */
     draw_field(cr, G->rx, y, G->rw, "RECORDING MBID",
                meta->recording_mbid, label_px, value_px, &mbid_color);
     draw_field(cr, G->rx, y2, G->rw, "RELEASE MBID",
@@ -273,7 +265,6 @@ static void draw_fields(cairo_t *cr, const Geom *G, const TrackMeta *meta,
                label_px, value_px, NULL);
 }
 
-/* PICK：候选列表 */
 static void draw_candidates(cairo_t *cr, const Geom *G, double y, double h,
                             double footer_top)
 {
@@ -361,7 +352,6 @@ static void draw_candidates(cairo_t *cr, const Geom *G, double y, double h,
     }
 }
 
-/* LOADING / ERROR / IDLE 的状态块 */
 static void draw_status(cairo_t *cr, const Geom *G, double y, double h,
                         const gchar *headline, const gchar *detail,
                         const Rgba *color)
@@ -376,8 +366,6 @@ static void draw_status(cairo_t *cr, const Geom *G, double y, double h,
     text_draw(cr, headline, &hs, G->rx, y, TEXT_LEFT, G->rw);
     text_draw(cr, detail, &ds, G->rx, y + px * 1.7, TEXT_LEFT, G->rw);
 }
-
-/* -------------------------------------------------------------- 主绘制 --- */
 
 void details_draw(cairo_t *cr, double width, double height)
 {
@@ -413,7 +401,6 @@ void details_draw(cairo_t *cr, double width, double height)
 
     footer_top = G.bottom_y - G.foot_px * 1.6;
 
-    /* 背景：压暗整屏，再叠一层封面种子色的柔光 */
     color_set(cr, RGBA(0.043, 0.043, 0.049, 0.93));
     cairo_rectangle(cr, 0.0, 0.0, width, height);
     cairo_fill(cr);
@@ -432,7 +419,6 @@ void details_draw(cairo_t *cr, double width, double height)
         cairo_pattern_destroy(glow);
     }
 
-    /* 数据：READY 用 MB 的字段，其它状态回落到配置里的曲名 / 艺人 */
     if (state == META_STATE_READY && meta != NULL) {
         title  = g_strdup(meta->title);
         artist = g_strdup(meta->artist);
@@ -443,7 +429,6 @@ void details_draw(cairo_t *cr, double width, double height)
         artist = g_strdup(track != NULL ? track->artist : NULL);
     }
 
-    /* 封面来源：配置 pic 优先，其次数据库封面 */
     if (track != NULL && track->pic != NULL && *track->pic != '\0')
         cover_caption = g_strdup("CONFIG PIC");
     else if (metadata_cover_path() != NULL)
@@ -455,7 +440,6 @@ void details_draw(cairo_t *cr, double width, double height)
                 state == META_STATE_PICK ? "[ ↑ ↓ ]  SELECT    [ ENTER ]  CONFIRM"
                                          : "[ R ]  RESEARCH    [ I / ESC ]  CLOSE");
 
-    /* 封面卡片 */
     {
         double card_pad = clampd(G.cover_px * 0.035, 8.0, 16.0);
         TextStyle cap = TEXT_STYLE(FONT_MONO, G.foot_px, PANGO_WEIGHT_NORMAL,
@@ -508,7 +492,6 @@ void details_draw(cairo_t *cr, double width, double height)
         }
     }
 
-    /* 底栏：数据来源 + 状态 */
     {
         TextStyle left = TEXT_STYLE(FONT_MONO, G.foot_px, PANGO_WEIGHT_NORMAL,
                                     G.foot_px * 0.12, col_hint);
@@ -536,8 +519,6 @@ void details_draw(cairo_t *cr, double width, double height)
                         &right, width - G.pad, G.bottom_y);
     }
 }
-
-/* ---------------------------------------------------------------- 输入 --- */
 
 gboolean details_key(guint keyval, GdkModifierType state)
 {
@@ -589,7 +570,7 @@ gboolean details_key(guint keyval, GdkModifierType state)
         }
     }
 
-    /* R：认错了就重搜一次；Enter 只在失败 / 无数据时当重试，避免误触清掉记录 */
+    /* R 重新识别；Enter 仅在失败或无数据时重试。 */
     if (keyval == GDK_KEY_r || keyval == GDK_KEY_R) {
         metadata_research();
         return TRUE;

@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/15
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "musicbrainz.h"
@@ -19,10 +20,8 @@
 #include "http.h"
 
 #define MB_API_BASE   "https://musicbrainz.org/ws/2"
-#define MB_MIN_GAP_US 1300000          /* 1.3s：官方限速 1 req/s，留一点余量 */
+#define MB_MIN_GAP_US 1300000          /* 官方限速 1 req/s，保留余量。 */
 #define CAA_BASE      "https://coverartarchive.org/release"
-
-/* ------------------------------------------------------------- 节流 ------ */
 
 static GMutex g_mb_mutex;
 static gint64 g_mb_last_us;
@@ -46,8 +45,6 @@ static void mb_throttle(void)
     g_mutex_unlock(&g_mb_mutex);
 }
 
-/* ------------------------------------------------------------- HTTP ------ */
-
 static gchar *mb_http_error(const HttpResponse *resp)
 {
     if (resp->status == 404)
@@ -65,7 +62,7 @@ static gchar *mb_http_error(const HttpResponse *resp)
     return NULL;
 }
 
-/* 同步 GET 一个 JSON 根节点。成功返回 TRUE，*parser 由调用方 unref。 */
+/* 同步获取 JSON；parser 由调用方 unref。 */
 static gboolean mb_get_json(const gchar *url, JsonParser **out_parser,
                             JsonNode **out_root, gchar **error)
 {
@@ -110,8 +107,6 @@ static gboolean mb_get_json(const gchar *url, JsonParser **out_parser,
     return TRUE;
 }
 
-/* -------------------------------------------------------- JSON 小工具 ---- */
-
 static const gchar *jo_string(JsonObject *obj, const gchar *member)
 {
     JsonNode *node;
@@ -155,7 +150,7 @@ static gint jo_int(JsonObject *obj, const gchar *member, gint fallback)
     return fallback;
 }
 
-/* artist-credit[] → "A feat. B" */
+/* artist-credit[] 拼接为显示字符串。 */
 static gchar *artist_credit_string(JsonArray *credits)
 {
     GString *out;
@@ -203,8 +198,7 @@ static gchar *artist_credit_string(JsonArray *credits)
     return g_string_free(out, FALSE);
 }
 
-/* 从 release[] 里挑一个「代表专辑」：正式专辑 > EP > 单曲，
- * 有日期的优先，其次 Official。 */
+/* 选择代表专辑：Album > EP > Single，优先 Official 与有日期。 */
 static JsonObject *pick_release(JsonArray *releases)
 {
     JsonObject *best = NULL;
@@ -306,8 +300,6 @@ static gchar *tags_string(JsonArray *tags)
     return g_string_free(out, FALSE);
 }
 
-/* ------------------------------------------------------------- 搜索 ----- */
-
 GPtrArray *mb_search_recordings(const gchar *title, const gchar *artist,
                                 gchar **error)
 {
@@ -406,9 +398,7 @@ GPtrArray *mb_search_recordings(const gchar *title, const gchar *artist,
     return out;
 }
 
-/* ------------------------------------------------------------- 详情 ----- */
-
-/* 从 release 详情里找这条录音在第几轨，并取总轨数 / 厂牌 / 条码 */
+/* 填充曲序、总轨数、厂牌、条码。 */
 static void release_fill(MbRecord *record, JsonObject *rel)
 {
     JsonArray *media;
@@ -545,7 +535,7 @@ MbRecord *mb_fetch_recording(const gchar *mbid, gchar **error)
     if (rel != NULL) {
         release_mbid = g_strdup(jo_string(rel, "id"));
 
-        /* 搜索结果里的 release 字段不全：再拉一次详情拿厂牌 / 曲序 / 条码 */
+        /* releases[] 字段不完整，补拉 release 详情。 */
         if (release_mbid != NULL) {
             JsonParser *release_parser = NULL;
             JsonNode   *release_root   = NULL;
@@ -565,7 +555,7 @@ MbRecord *mb_fetch_recording(const gchar *mbid, gchar **error)
 
                 g_object_unref(release_parser);
             } else {
-                /* 详情拉不到不算失败：先用手里的 releases[] 字段 */
+                /* release 详情失败时保留已有字段。 */
                 g_debug("musicbrainz: release %s detail failed: %s",
                         release_mbid, release_err != NULL ? release_err : "-");
             }

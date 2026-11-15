@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <stdio.h>
@@ -23,7 +24,6 @@
 #include "config.h"
 
 #if defined(_WIN32)
-/* HTTPS 用的 CA 证书 */
 static void http_use_bundled_ca(void)
 {
     wchar_t  wbuf[MAX_PATH];
@@ -65,7 +65,7 @@ typedef struct {
     size_t cap;
 } Buffer;
 
-/* GET / POST 的公共实现：body == NULL 就是 GET */
+/* GET / POST 公共实现；body == NULL 为 GET。 */
 static int http_request(const char *url, const char *body, const char *headers,
                         HttpResponse *resp, long timeout_sec);
 
@@ -124,8 +124,7 @@ static int http_request(const char *url, const char *body, const char *headers,
 
     memset(resp, 0, sizeof(*resp));
 
-    /* 每次调用都现取配置：ini 里写了就用，没写回落到内置默认
-     * （timeout_sec > 0 的调用方仍可单次覆盖） */
+    /* 每次调用读取配置；timeout_sec > 0 可覆盖。 */
     timeout = timeout_sec > 0 ? timeout_sec : config_http_timeout();
 
     curl = curl_easy_init();
@@ -148,8 +147,7 @@ static int http_request(const char *url, const char *body, const char *headers,
 
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 
-    /* headers 里自己带了 User-Agent（MusicBrainz 要求项目专用 UA）时
-     * 不要再设 CURLOPT_USERAGENT，否则会发两条冲突的 UA 头。 */
+    /* headers 已含 User-Agent 时不再设置 CURLOPT_USERAGENT。 */
     {
         gboolean ua_in_headers = FALSE;
 

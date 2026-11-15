@@ -1,0 +1,87 @@
+name: build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64 (MSYS2)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-libepoxy
+            mingw-w64-x86_64-libqrencode
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-json-glib
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-librsvg
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DFOLLOW_EXE_IN_SOURCE_DIR=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install
+        run: cmake --install build --prefix dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Follow-windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
+
+  linux:
+    name: Linux x86_64 (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libgtk-4-dev libgdk-pixbuf-2.0-dev libepoxy-dev \
+            libqrencode-dev libcurl4-openssl-dev libjson-glib-dev \
+            libsqlite3-dev librsvg2-dev \
+            libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DFOLLOW_EXE_IN_SOURCE_DIR=OFF
+
+      - name: Build
+        run: cmake --build build

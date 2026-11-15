@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "qrcard.h"
@@ -20,17 +21,13 @@
 #include "theme.h"
 #include "ui.h"
 
-/* 二维码的底色 */
 #define QR_BG_R 0.039
 #define QR_BG_G 0.039
 #define QR_BG_B 0.039
 #define QR_INK_ALPHA 0.95
 
-/* 槽的增删 */
-
 static void qr_slot_clear(QrSlot *slot)
 {
-    /* free 完必须置 NULL —— qr_slot_set() 也会先 clear 一次 */
     g_clear_pointer(&slot->text, g_free);
     g_clear_pointer(&slot->label, g_free);
 
@@ -46,7 +43,6 @@ static void qr_slot_clear(QrSlot *slot)
     slot->with_icon = FALSE;
 }
 
-/* "https://www.github.com/xxx/" → "github.com/xxx" */
 static gchar *short_url(const char *url)
 {
     const char *p = url;
@@ -70,7 +66,6 @@ static gchar *short_url(const char *url)
     return out;
 }
 
-/* "https://www.github.com/x/y" → "github.com" */
 static gchar *url_host(const char *url)
 {
     const char *p = url;
@@ -109,9 +104,6 @@ static void qr_slot_set(QrSlot *slot, const char *text, const char *label,
         g_warning("qrcode: cannot encode %s", text);
 }
 
-/* 渲染 */
-
-/* 预渲染成边长为 size 的正方形. 模块大小是分数，但每条边都对到像素 */
 static cairo_surface_t *qr_slot_surface(QrSlot *slot, double size)
 {
     int      n, side;
@@ -145,7 +137,7 @@ static cairo_surface_t *qr_slot_surface(QrSlot *slot, double size)
 
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, QR_INK_ALPHA);
 
-    m = (double)side / (double)(n + 2);   /* 含四周一个模块静区 */
+    m = (double)side / (double)(n + 2);
 
     for (int my = 0; my < n; my++) {
         for (int mx = 0; mx < n; mx++) {
@@ -169,18 +161,13 @@ static cairo_surface_t *qr_slot_surface(QrSlot *slot, double size)
     return slot->surface;
 }
 
-/* 胶囊：高度固定 = h
- *
- *   有官方字标 → 胶囊里直接贴 logo
- *   没有字标   → 退回"品牌色图标 + 文字"，文字垂直水平居中
- *   没有平台   → 只显示文字 */
 static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
                          gboolean with_icon, double cx, double y, double h, double max_w)
 {
-    static const double PAD_RATIO  = 0.34;   /* 左右留白 / 胶囊高 */
-    static const double LOGO_RATIO = 0.52;   /* 字标 / 图标高度 / 胶囊高 */
-    static const double FONT_RATIO = 0.42;   /* 字号 / 胶囊高 */
-    static const double GAP_RATIO  = 0.22;   /* 图标与文字的间距 / 胶囊高 */
+    static const double PAD_RATIO  = 0.34;
+    static const double LOGO_RATIO = 0.52;
+    static const double FONT_RATIO = 0.42;
+    static const double GAP_RATIO  = 0.22;
 
     TextStyle style;
     double    pad, logo_h = 0.0, logo_w = 0.0, icon = 0.0, gap = 0.0;
@@ -193,7 +180,6 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
 
     pad = h * PAD_RATIO;
 
-    /* 官方字标优先 */
     if (with_icon && platform != PLATFORM_UNKNOWN) {
         has_wordmark = platform_wordmark_size(platform, h * LOGO_RATIO,
                                               max_w - pad * 2.0, &logo_w, &logo_h);
@@ -201,7 +187,6 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
             content_w = logo_w;
     }
 
-    /* 没有字标：图标 + 文字 */
     if (!has_wordmark) {
         if (text == NULL || *text == '\0')
             return;
@@ -222,7 +207,6 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
     w = MIN(max_w, content_w + pad * 2.0);
     x = cx - w * 0.5;
 
-    /* 深色衬底（高度恒定，垂直居中于 y..y+h） */
     color_set(cr, col_card);
     path_round_rect(cr, x, y, w, h, h * 0.5);
     cairo_fill_preserve(cr);
@@ -248,7 +232,6 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
     if (with_icon)
         platform_draw_icon(cr, platform, x + pad, y + (h - icon) * 0.5, icon);
 
-    /* 文字水平居中于"图标 + 文字"整体，垂直居中于胶囊 */
     style.color = RGBA(0.902, 0.902, 0.910, 0.86);
     text_h = text_height(cr, text, &style);
 
@@ -261,7 +244,6 @@ static void draw_capsule(cairo_t *cr, const char *text, Platform platform,
     }
 }
 
-/* 一个二维码单元格：二维码 + 下方胶囊 */
 static void draw_cell(cairo_t *cr, QrSlot *slot, const Layout *L, double cx)
 {
     cairo_surface_t *surface;
@@ -282,8 +264,6 @@ static void draw_cell(cairo_t *cr, QrSlot *slot, const Layout *L, double cx)
     draw_capsule(cr, slot->label, slot->platform, slot->with_icon,
                  cx, L->badge_y, L->badge_h, L->badge_w);
 }
-
-/* 对外接口  */
 
 void qrcard_update(const AudioTrack *track)
 {
@@ -310,7 +290,6 @@ void qrcard_update(const AudioTrack *track)
         qr_slot_clear(&app.qr[0]);
     }
 
-    /* 自定义链接：本地路径不显示；和曲目页重复也不显示 */
     if (cfg->qrcode_link != NULL && config_is_remote(cfg->qrcode_link) &&
         g_strcmp0(page, cfg->qrcode_link) != 0) {
         g_autofree gchar *host = url_host(cfg->qrcode_link);
@@ -338,7 +317,6 @@ void qrcard_draw(cairo_t *cr, const Layout *L)
     if (L->n_qr <= 0)
         return;
 
-    /* 1 个居中，2 个并排 */
     row_w = (double)L->n_qr * L->cell_w + (double)(L->n_qr - 1) * L->cell_gap;
     x0    = L->col_cx - row_w * 0.5;
 

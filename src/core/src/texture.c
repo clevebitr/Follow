@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <string.h>
@@ -15,7 +16,7 @@
 
 static const cairo_user_data_key_t g_surface_pixels_key;
 
-/* 直通 RGBA（非预乘）→ cairo 的 ARGB32（预乘；小端下内存序是 B,G,R,A） */
+/* RGBA（非预乘）→ ARGB32（预乘）。 */
 cairo_surface_t *rgba_to_cairo_surface(const guchar *rgba, int width, int height)
 {
     guchar          *data;
@@ -50,7 +51,6 @@ cairo_surface_t *rgba_to_cairo_surface(const guchar *rgba, int width, int height
         return NULL;
     }
 
-    /* 让 surface 负责释放这块内存 */
     cairo_surface_set_user_data(surface, &g_surface_pixels_key, data, g_free);
 
     return surface;
@@ -94,7 +94,7 @@ cairo_surface_t *rgba_to_cairo_surface_fit(const guchar *rgba, int width, int he
     return dst;
 }
 
-/* 一维盒式模糊（就地），dir = 0 横向 / 1 纵向 */
+/* 一维盒式模糊。 */
 static void box_blur_pass(guchar *data, int w, int h, int stride, int radius, int dir)
 {
     if (radius < 1)
@@ -115,14 +115,11 @@ static void box_blur_pass(guchar *data, int w, int h, int stride, int radius, in
             if (dir == 0) {
                 memcpy(copy, row, (size_t)len * 4);
             } else {
-                /* 纵向：按 stride 把一列像素收集到连续内存里。
-                 * 原来这里直接 memcpy，纵向 pass 读的其实是第一行的数据，
-                 * 会在整屏拉出斜向条纹。 */
+                /* 纵向按 stride 收集到连续内存。 */
                 for (int i = 0; i < len; i++)
                     memcpy(copy + (size_t)i * 4, row + (size_t)i * stride, 4);
             }
 
-            /* 滑动窗口：先把左边 radius 个样本加进来 */
             for (int i = 0; i <= radius && i < len; i++) {
                 for (int c = 0; c < 4; c++)
                     a[c] += copy[i * 4 + c];
@@ -134,7 +131,6 @@ static void box_blur_pass(guchar *data, int w, int h, int stride, int radius, in
                     row[(size_t)i * step + c] = (guchar)(a[c] / count);
                 }
 
-                /* 窗口右移：去掉最左、加上最右 */
                 if (i - radius >= 0) {
                     for (int c = 0; c < 4; c++)
                         a[c] -= copy[(size_t)(i - radius) * 4 + c];

@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "covercache.h"
@@ -22,7 +23,7 @@
 #include "texture.h"
 #include "ui.h"
 
-/* 列表页最大的中心封面约 440px；512 够用，也不至于一张图就吃掉几 MB */
+/* 封面缓存尺寸 512px。 */
 #define COVERCACHE_MAX_DIM 640
 
 typedef struct {
@@ -30,16 +31,16 @@ typedef struct {
     gint64           ready_us;
     Palette          palette;
     gboolean         has_palette;
-    gboolean         attempted;   /* 试过了：成功或失败都不再自动重试 */
+    gboolean         attempted;
     gboolean         loading;
 } CoverEntry;
 
 typedef struct {
     guint            gen;
     gsize            index;
-    gchar           *path;        /* 本地图片 / 远程磁盘缓存 */
-    gchar           *url;         /* 远程地址，本地图为 NULL */
-    gchar           *cache_path;  /* 远程下载后写到这 */
+    gchar           *path;
+    gchar           *url;
+    gchar           *cache_path;
     cairo_surface_t *surface;
     Palette          palette;
     gboolean         has_palette;
@@ -89,7 +90,7 @@ void covercache_sync(void)
     }
 }
 
-/* 解码 + 取色 + 缩放到缓存尺寸。纯 CPU / cairo 操作，可以在后台线程跑。 */
+/* 解码 / 取色 / 缩放可在后台线程执行。 */
 static gboolean decode_pixbuf(GdkPixbuf *pixbuf, cairo_surface_t **out_surface,
                               Palette *out_palette, gboolean *out_has_palette)
 {
@@ -132,15 +133,13 @@ static gpointer covercache_thread(gpointer data)
     CoverJob *job = data;
     GdkPixbuf *pixbuf = NULL;
 
-    /* 1) 本地文件或远程磁盘缓存 */
     if (job->path != NULL && g_file_test(job->path, G_FILE_TEST_EXISTS)) {
         pixbuf = gdk_pixbuf_new_from_file(job->path, NULL);
 
         if (pixbuf == NULL)
-            g_unlink(job->path);   /* 缓存坏了，删掉重下 */
+            g_unlink(job->path);
     }
 
-    /* 2) 远程下载 */
     if (pixbuf == NULL && job->url != NULL && *job->url != '\0') {
         HttpResponse resp = { 0 };
         if (http_get(job->url, &resp, 20) == 0 && resp.status == 200) {
@@ -181,8 +180,7 @@ static gpointer covercache_thread(gpointer data)
     if (job->surface == NULL && job->error == NULL)
         job->error = g_strdup("no cover file");
 
-    /* 用默认优先级而不是 IDLE：界面持续 60fps 重绘时，IDLE 优先级的回调
-     * 会被一直压在后面，封面迟迟不出现。 */
+    /* 使用默认优先级，避免 IDLE 回调被持续重绘压制。 */
     g_idle_add_full(G_PRIORITY_DEFAULT, covercache_done, job, NULL);
     return NULL;
 }

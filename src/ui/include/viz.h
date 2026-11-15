@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #ifndef FOLLOW_VIZ_H
@@ -17,34 +18,28 @@
 
 #include "palette.h"
 
-/* 音频粒子背景（dust / warp / flow）。
- * 画在动态背景的小纹理里、scrim 之前；CPU 回退用 cairo，GPU 用下面这组
- * 预乘加色 sprite 顶点。 */
+/* 音频粒子背景：CPU cairo 与 GPU sprite 两条路径。 */
 
 typedef struct {
-    float x, y;      /* 屏幕逻辑像素 */
-    float u, v;      /* 径向光斑纹理坐标 0..1 */
-    float r, g, b;   /* 颜色 */
-    float a;         /* 透明度 */
+    float x, y;
+    float u, v;
+    float r, g, b;
+    float a;
 } VizGlVertex;
 
 void        viz_configure(const gchar *effect, int particles, double gain);
-void        viz_reset(void);                 /* 退出时释放 */
+void        viz_reset(void);
 gboolean    viz_active(void);
 const gchar *viz_effect_name(void);
 
-/* 每帧调用：读 media scope、做 FFT、推进粒子。 */
 void        viz_tick(void);
 
-/* 在自己的 cairo 目标上画粒子；pal 是当前封面取出的颜色。 */
 void        viz_draw(cairo_t *cr, double w, double h, const Palette *pal);
 
-/* GPU 路径：把当前粒子展开成加色混合的 sprite 四边形。
- * 返回写入的顶点数（6 的倍数），0 = 没有粒子。 */
+/* 展开为加色混合的 sprite 四边形。 */
 int         viz_gl_vertices(VizGlVertex *out, int max,
                             double w, double h, const Palette *pal);
 
-/* 换曲时放一小撮新粒子，配合背景退潮过渡。 */
 void        viz_burst(void);
 
-#endif /* FOLLOW_VIZ_H */
+#endif

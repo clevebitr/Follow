@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "cover.h"
@@ -23,18 +24,17 @@
 #include "texture.h"
 #include "ui.h"
 
-/* 原图长边上限 */
 #define COVER_MAX_DIM 768
 
 typedef struct {
     guint   gen;
     gchar  *url;
-    gchar  *cache_path;   /* 下载成功后写到这里 */
+    gchar  *cache_path;
     GBytes *bytes;
     gchar  *error;
 } CoverJob;
 
-/* 图床的 @... 后缀改成正方形 JPEG；其它地址的 .avif 换 .jpg */
+/* 图床 @ 后缀改为正方形 JPEG；.avif 改为 .jpg。 */
 gchar *cover_url_normalize(const char *url)
 {
     if (url == NULL)
@@ -59,7 +59,7 @@ gchar *cover_url_normalize(const char *url)
     return g_strdup(url);
 }
 
-/* 把 gdk-pixbuf 装成当前封面：取种子色 + 降到 768px 的 cairo surface。 */
+/* 安装封面：取色并缩放到 768px。 */
 static void install_pixbuf(GdkPixbuf *pixbuf)
 {
     const int     w      = gdk_pixbuf_get_width(pixbuf);
@@ -92,7 +92,6 @@ static void install_pixbuf(GdkPixbuf *pixbuf)
     app.cover = rgba_to_cairo_surface_fit(rgba, w, h, COVER_MAX_DIM);
     g_free(rgba);
 
-    /* 底图会在下一帧用新封面重建；退潮过渡由 cover_set() 里的 backdrop_swap() 开始 */
     backdrop_invalidate();
     ui_request_redraw();
 }
@@ -160,7 +159,6 @@ static void cover_set_remote(const AudioTrack *track)
 {
     g_autofree gchar *cache_path = follow_cache_file("cover", track->pic, "img");
 
-    /* 命中缓存就直接读，不再走网络 */
     if (cache_path != NULL && g_file_test(cache_path, G_FILE_TEST_EXISTS)) {
         GdkPixbuf *cached = gdk_pixbuf_new_from_file(cache_path, NULL);
 
@@ -184,7 +182,6 @@ static void cover_set_remote(const AudioTrack *track)
     }
 }
 
-
 void cover_clear(void)
 {
     g_clear_pointer(&app.cover, cairo_surface_destroy);
@@ -198,11 +195,10 @@ void cover_set(const AudioTrack *track)
     GdkPixbuf        *pixbuf;
     gchar            *path;
 
-    /* 先把上一张背景留作退场再换封面 */
     backdrop_swap();
 
     cover_clear();
-    app.cover_gen++;                /* 作废还在下载的旧封面 */
+    app.cover_gen++;
     palette_reset(&app.palette);
     ui_request_redraw();
 
@@ -240,15 +236,14 @@ void cover_apply_metadata(void)
     if (!config_metadata_cover())
         return;
 
-    /* 用户在 ini 里指认了封面：永远优先，哪怕数据库也有 */
+    /* 配置 pic 优先。 */
     if (track != NULL && track->pic != NULL && *track->pic != '\0')
         return;
 
     if (app.cover != NULL)
         return;
 
-    /* 元数据可能还停在上一首（切歌顺序：player 先换封面，tick 后加载元数据）。
-     * 先让状态机切到这首：命中本地库时这一步是同步的，封面可以立刻装上。 */
+    /* 切换元数据到当前曲目；本地命中时同步可用。 */
     {
         g_autofree gchar *key = metadata_track_key(track);
 
@@ -283,7 +278,6 @@ cairo_surface_t *cover_base(void)
     return app.cover;
 }
 
-/* 按显示尺寸缩一份并缓存 */
 static cairo_surface_t *cover_scaled_for(double size)
 {
     const double sw = (double)cairo_image_surface_get_width(app.cover);
@@ -335,7 +329,6 @@ void cover_draw(cairo_t *cr, double x, double y, double size)
         return;
 
     if (app.cover == NULL) {
-        /* 占位框：一圈很淡的边框 */
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.04);
         cairo_rectangle(cr, x, y, size, size);
         cairo_fill(cr);

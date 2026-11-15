@@ -1,19 +1,13 @@
 cmake_minimum_required(VERSION 3.25)
 
-# ---------------------------------------------------------------------------
-#  Follow
-#  开发：
-#    cmake --preset mingw64            # 或者 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-#    cmake --build build               # 产物：源码根目录的 main.exe（资源是相对路径）
-#    ./main.exe                        # 在源码根目录跑
-#
-#  打包（NSIS 安装包）：
-#    cpack --preset mingw64
-#    或者 cmake --install build --prefix /some/dir
-# ---------------------------------------------------------------------------
+# Follow
+# 开发：cmake --preset mingw64 && cmake --build build
+# 打包：cpack --preset mingw64
+
+set(FOLLOW_VERSION "0.1.0" CACHE STRING "项目版本（release 时由 tag 覆盖）")
 
 project(Follow
-    VERSION      0.1.0
+    VERSION      ${FOLLOW_VERSION}
     DESCRIPTION  "把「正在听什么」摆到屏幕上给观众看的极简音乐播放器"
     HOMEPAGE_URL "https://github.com/clevebitr/follow"
     LANGUAGES    C)
@@ -29,10 +23,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
                  Debug Release RelWithDebInfo MinSizeRel)
 endif()
 
-# --------------------------------------------------------------- 依赖 ------
+# 依赖
 find_package(PkgConfig REQUIRED)
 
-# 与 Makefile 时代保持一致的依赖集合
 set(FOLLOW_PKGS
     gtk4
     epoxy
@@ -48,7 +41,7 @@ set(FOLLOW_PKGS
 
 pkg_check_modules(FOLLOW_DEPS REQUIRED IMPORTED_TARGET ${FOLLOW_PKGS})
 
-# --------------------------------------------------------------- 选项 ------
+# 选项
 set(FOLLOW_EXE_NAME "main" CACHE STRING "可执行文件名（不带 .exe）")
 set(FOLLOW_APP_ID "org.github.clevebitr.follow" CACHE STRING "GApplication id")
 
@@ -61,11 +54,14 @@ option(FOLLOW_INSTALL_ASSETS
 option(FOLLOW_BUILD_MCP
        "构建 crates/gtk-mcp-agent-capi 调试用 MCP（需要 cargo）" OFF)
 
-# ------------------------------------------------------------- 模块 / 可执行文件 ---
-# 源码树见 src/CMakeLists.txt：core → net → music → ui → app，各自独立静态库。
+# 模块与可执行文件
 add_subdirectory(src)
 
 target_compile_definitions(follow PRIVATE FOLLOW_APP_ID="${FOLLOW_APP_ID}")
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(follow PRIVATE m dl pthread)
+endif()
 
 set_target_properties(follow PROPERTIES OUTPUT_NAME "${FOLLOW_EXE_NAME}")
 
@@ -86,10 +82,9 @@ if(FOLLOW_EXE_IN_SOURCE_DIR)
     endforeach()
 endif()
 
-# 安装/打包
+# 安装 / 打包
 install(TARGETS follow RUNTIME DESTINATION .)
 
-# 程序资源：main.c 按相对路径找 src/style/style.css、src/config.ini、src/icons/*.svg
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/src/style"
                   "${PROJECT_SOURCE_DIR}/src/icons"
         DESTINATION src)
@@ -99,12 +94,13 @@ if(FOLLOW_INSTALL_ASSETS AND EXISTS "${PROJECT_SOURCE_DIR}/src/assets")
     install(DIRECTORY "${PROJECT_SOURCE_DIR}/src/assets" DESTINATION src)
 endif()
 
+install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION .)
 install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION . OPTIONAL)
 
-# GTK / FFmpeg 的运行时数据与 DLL（Windows）
+# 运行时 DLL（Windows）
 include(cmake/FollowRuntime.cmake)
 
-# 调试用 MCP（Rust）：cmake --build build --target mcp
+# 可选的调试 MCP（Rust）
 if(FOLLOW_BUILD_MCP)
     add_custom_target(mcp
         COMMAND cargo build --release
@@ -118,5 +114,4 @@ if(FOLLOW_BUILD_MCP)
             DESTINATION . OPTIONAL)
 endif()
 
-# CPack：NSIS 安装包
 include(cmake/FollowPackaging.cmake)

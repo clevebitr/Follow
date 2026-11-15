@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "player.h"
@@ -20,8 +21,6 @@
 #include "stage.h"
 #include "theme.h"
 #include "ui.h"
-
-/* 网络地址解析（后台线程） */
 
 typedef struct {
     guint       gen;
@@ -51,7 +50,7 @@ static void set_resolved_meta(const gchar *title, const gchar *artist)
     ui_request_redraw();
 }
 
-/* 解析失败的原因：显示到歌词那行，不然用户只看到"没反应" */
+/* 解析失败原因显示在歌词行。 */
 static void set_source_error(const gchar *message)
 {
     g_free(app.source_error);
@@ -75,7 +74,6 @@ static gboolean resolve_done(gpointer data)
                 app.source_cached = job->src.from_cache;
                 set_source_error(NULL);
 
-                /* ini 写了就用 ini 的，只有缺的字段才用解析结果补 */
                 if (!has_title || !has_artist)
                     set_resolved_meta(has_title ? NULL : job->src.title,
                                       has_artist ? NULL : job->src.artist);
@@ -113,10 +111,7 @@ static gpointer resolve_thread(gpointer data)
     return NULL;
 }
 
-/* 曲目信息 */
-
-/* 优先级：ini 里的 title/artist > 网络解析 > 文件名。
- * 还没开始播放时（app.track < 0）先显示列表里第一首的资料。 */
+/* 标题优先级：ini > 网络解析 > 文件名。 */
 gchar *player_label(void)
 {
     const AudioTrack *track = config_track_at(config_get(),
@@ -161,8 +156,6 @@ void player_update_window_title(void)
                            title != NULL ? title : "Follow");
 }
 
-/* 切歌 */
-
 static void history_push(gint index)
 {
     if (app.history_len < (gint)G_N_ELEMENTS(app.history))
@@ -178,10 +171,8 @@ gboolean player_play_index(gint index)
     if (index < 0 || track == NULL)
         return FALSE;
 
-    /* 先把现在的画面拍下来：切歌后它整块往左退场 */
     stage_snapshot();
 
-    /* 每次切歌都作废还在路上的解析请求 */
     media_begin_track(&app.media);
 
     app.track        = index;
@@ -193,7 +184,7 @@ gboolean player_play_index(gint index)
     app.source_pending = FALSE;
 
     cover_set(track);
-    lyricview_load(track);      /* 顺便把这首歌的歌词偏移重置成 ini 里的值 */
+    lyricview_load(track);
     qrcard_update(track);
     set_resolved_meta(NULL, NULL);
     set_source_error(NULL);
@@ -208,7 +199,7 @@ gboolean player_play_index(gint index)
         return TRUE;
     }
 
-    ++app.resolve_gen;      /* 本地曲目：同样作废上一首还没回来的解析 */
+    ++app.resolve_gen;
 
     local = config_to_local_path(track->link);
 
@@ -227,7 +218,6 @@ gboolean player_play_index(gint index)
     return TRUE;
 }
 
-/* 随机挑一个和当前不同的曲目 */
 static gboolean play_random(void)
 {
     gint n = (gint)config_get()->n_tracks;
@@ -248,7 +238,7 @@ static gboolean play_random(void)
     return FALSE;
 }
 
-/* 自动顺序下的下一首（不考虑随机 / 停机），用于 NEXT 预告的默认值 */
+/* 自动顺序下的下一首，用于 NEXT 预告。 */
 static gint natural_next(void)
 {
     gint n = (gint)config_get()->n_tracks;
@@ -285,7 +275,6 @@ void player_queue_step(gint dir)
     if (at < 0)
         at += n;
 
-    /* 转回自动顺序的那一首时取消覆盖 */
     app.queue_next = (at == natural_next()) ? -1 : at;
 
     {
@@ -308,14 +297,13 @@ void player_play_neighbour(gint dir)
         return;
     }
 
-    /* 随机模式 */
     if (app.shuffle) {
         if (dir < 0 && app.history_len > 1) {
-            app.history_len--;                 /* 栈顶是当前曲目，先弹掉 */
+            app.history_len--;
 
             for (gint i = app.history_len - 1; i >= 0; i--) {
                 if (player_play_index(app.history[i]))
-                    return;                    /* play_index 会把它重新压栈 */
+                    return;
             }
         }
 
@@ -356,8 +344,6 @@ gboolean player_play_first(void)
               cfg->n_tracks);
     return FALSE;
 }
-
-/* 传输控制 */
 
 void player_toggle(void)
 {
@@ -436,8 +422,7 @@ void player_toggle_shuffle(void)
     ui_request_redraw();
 }
 
-/* 缓存直链失效：解码器报错后失效解析缓存并重新解析一次。
- * 只重试一次，避免死链反复拉 API。 */
+/* 缓存直链失效时重新解析一次，避免死链循环。 */
 void player_check_load_failure(void)
 {
     const AudioTrack *track;
@@ -469,10 +454,8 @@ void player_check_finished(void)
     if (!media_is_finished(&app.media))
         return;
 
-    /* 先把这个事件消费掉：下一首要走解析/下载，期间 state 还是上一首的 */
     media_ack_finished(&app.media);
 
-    /* NEXT 预告被显式指定过：优先播它，然后回到自动顺序 */
     if (app.queue_next >= 0) {
         gint idx = app.queue_next;
 
@@ -500,7 +483,6 @@ void player_check_finished(void)
         return;
     }
 
-    /* 顺序播放且不循环：最后一首就停下 */
     if (app.track + 1 < (gint)config_get()->n_tracks) {
         player_play_neighbour(+1);
     } else {
@@ -512,7 +494,7 @@ void player_check_finished(void)
 
 void player_clear(void)
 {
-    app.resolve_gen++;              /* 作废还在解析的请求 */
+    app.resolve_gen++;
     g_clear_pointer(&app.resolved_title, g_free);
     g_clear_pointer(&app.resolved_artist, g_free);
     g_clear_pointer(&app.source_error, g_free);

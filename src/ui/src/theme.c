@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <math.h>
@@ -49,7 +50,7 @@ static PangoLayout *build_layout(cairo_t *cr, const char *text, const TextStyle 
     return layout;
 }
 
-/* 单行 / 多行的公共设置。max_width <= 0 表示不限宽也不换行。 */
+/* max_width <= 0 表示不限宽、不换行。 */
 static PangoLayout *build_block(cairo_t *cr, const char *text, const TextStyle *style,
                                 double max_width, int align, int max_lines)
 {
@@ -64,7 +65,7 @@ static PangoLayout *build_block(cairo_t *cr, const char *text, const TextStyle *
     }
 
     if (max_lines > 0) {
-        pango_layout_set_height(layout, -max_lines);   /* 负数 = 最多几行 */
+        pango_layout_set_height(layout, -max_lines);
         pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     }
 
@@ -101,9 +102,7 @@ double text_height(cairo_t *cr, const char *text, const TextStyle *style)
     return (double)height;
 }
 
-/* 墨迹（实际绘制部分）相对排版框顶部的下边界。
- * 手写体等字体的排版框留白很大（158px 的字排版框可达 277px），
- * 需要贴合字形排版时应使用墨迹而非框高。无墨迹时返回 0。 */
+/* 墨迹相对排版框顶部；无墨迹返回 0。 */
 double text_ink_top(cairo_t *cr, const char *text, const TextStyle *style)
 {
     PangoLayout   *layout;
@@ -147,7 +146,7 @@ void text_draw(cairo_t *cr, const char *text, const TextStyle *style,
         return;
 
     if (max_width > 8.0) {
-        /* 单行：放不下就省略号，绝不折行（胶囊、曲名这类都用它） */
+        /* 单行：超出宽度使用省略号。 */
         layout = build_block(cr, text, style, max_width, align, 1);
         if (align == TEXT_CENTER)
             x -= max_width * 0.5;
@@ -190,9 +189,7 @@ double text_block_height(cairo_t *cr, const char *text, const TextStyle *style,
     return (double)height;
 }
 
-/* 自动折行：交给 Pango 排一次（限宽、不限行数、不省略），
- * 再把每个视觉行的字节区间和纵向位置抄出来。
- * 之后再按行单独画字形遮罩，长句就不会被“最多几行 + 省略号”截掉。 */
+/* 按宽度折行，返回每行字节区间与纵向位置。 */
 TextRow *text_wrap(cairo_t *cr, const char *text, const TextStyle *style,
                    double max_width, int *out_n, double *out_h)
 {
@@ -221,9 +218,7 @@ TextRow *text_wrap(cairo_t *cr, const char *text, const TextStyle *style,
         if (line == NULL || line->length <= 0)
             continue;
 
-        /* readonly 行只读，不改它，拿一下行内文字的范围和行高。
-         * 注意 pango_layout_line_get_extents() 的纵向是相对这一行自己的原点，
-         * 不是相对整个 layout，所以偏移得自己累加。 */
+        /* 行坐标相对行自身原点，偏移需自行累加。 */
         pango_layout_line_get_extents(line, &ink, &logical);
         y = acc;
         h = (double)logical.height / PANGO_SCALE;
@@ -272,7 +267,6 @@ double text_draw_block(cairo_t *cr, const char *text, const TextStyle *style,
     layout = build_block(cr, text, style, max_width, align, max_lines);
     pango_layout_get_pixel_size(layout, NULL, &height);
 
-    /* 限宽时布局宽度就是 max_width，居中要按这个宽度算 */
     if (max_width > 8.0 && align == TEXT_CENTER)
         x -= max_width * 0.5;
 
@@ -289,8 +283,6 @@ double text_draw_block(cairo_t *cr, const char *text, const TextStyle *style,
     return (double)height;
 }
 
-/* ---------- 文字 => GPU 遮罩 ---------- */
-
 cairo_surface_t *text_mask_surface(const char *text, const TextStyle *style,
                                    double max_width, int align, int max_lines,
                                    int pad, int *out_w, int *out_h)
@@ -305,7 +297,7 @@ cairo_surface_t *text_mask_surface(const char *text, const TextStyle *style,
     if (text == NULL || *text == '\0' || style->px <= 0.0)
         return NULL;
 
-    /* Pango 需要一个 cairo_t 才能建 layout；量尺寸用 1x1 的临时面 */
+    /* 测量使用 1x1 临时 surface。 */
     scratch = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
     cr      = cairo_create(scratch);
     layout  = build_block(cr, text, style, max_width, align, max_lines);
@@ -343,12 +335,7 @@ cairo_surface_t *text_mask_surface(const char *text, const TextStyle *style,
     return mask;
 }
 
-/* ---------- 文字 => GPU 遮罩（字形 + 逐字时间坐标） ---------- */
-
-/* 把 utf8 字符在整句里的位置（0..255）写成灰度属性，然后渲染出来。
- * 结果是一张和字形遮罩逐像素对齐的"时间坐标图"：
- *   GPU 上拿它和播放进度比较，就能实现从左到右逐字亮起的效果。
- * base / total 是这段文字在整句里的起始字序号和整句字数（折行后仍然连续）。 */
+/* 将逐字时间写为灰度图；base / total 用于归一化。 */
 static void build_order_attrs(PangoLayout *layout, const char *text,
                               const guint8 *order, int n_order)
 {
@@ -359,7 +346,7 @@ static void build_order_attrs(PangoLayout *layout, const char *text,
     if (attrs == NULL) {
         attrs = pango_attr_list_new();
         pango_layout_set_attributes(layout, attrs);
-        pango_attr_list_unref(attrs);       /* 布局自己持有一份 */
+        pango_attr_list_unref(attrs);
     }
 
     for (p = text; *p != '\0'; p = g_utf8_next_char(p))
@@ -413,7 +400,6 @@ gboolean text_mask_pair(const char *text, const TextStyle *style, int pad,
 
     scratch = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
     cr      = cairo_create(scratch);
-    /* 单行：一行已经由 text_wrap 折好，这里不再限宽 / 省略 */
     layout  = build_layout(cr, text, style);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_destroy(cr);
@@ -427,14 +413,12 @@ gboolean text_mask_pair(const char *text, const TextStyle *style, int pad,
     sw = tw + pad * 2;
     sh = th + pad * 2;
 
-    /* 逐字灰阶必须在第一次排版使用之前塞进去：Pango 的行缓存会记住属性，
-     * 事后改属性列表不会生效（渲染出来全是底色）。 */
+    /* 属性必须在首次排版前设置。 */
     if (out_order != NULL) {
         build_order_attrs(layout, text, order, n_order);
         pango_layout_context_changed(layout);
     }
 
-    /* 1) 字形遮罩 */
     glyph = cairo_image_surface_create(CAIRO_FORMAT_A8, sw, sh);
 
     if (cairo_surface_status(glyph) != CAIRO_STATUS_SUCCESS)
@@ -446,7 +430,6 @@ gboolean text_mask_pair(const char *text, const TextStyle *style, int pad,
     pango_cairo_show_layout(cr, layout);
     cairo_destroy(cr);
 
-    /* 2) 逐字时间坐标：每个字用不同的灰阶画出来，再抽出 R 通道 */
     if (out_order != NULL) {
         argb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
 
@@ -455,7 +438,7 @@ gboolean text_mask_pair(const char *text, const TextStyle *style, int pad,
 
         cr = cairo_create(argb);
         cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
-        cairo_paint(cr);                       /* 底色 = 0（没有字的地方当作"已唱完"） */
+        cairo_paint(cr);
         cairo_move_to(cr, x, pad);
         pango_cairo_show_layout(cr, layout);
         cairo_destroy(cr);
@@ -482,7 +465,7 @@ gboolean text_mask_pair(const char *text, const TextStyle *style, int pad,
                 guchar        *d = dst + (gsize)y * dstride;
 
                 for (int xx = 0; xx < sw; xx++)
-                    d[xx] = (guchar)((s[xx] >> 16) & 0xff);   /* 小端 ARGB32 的 R */
+                    d[xx] = (guchar)((s[xx] >> 16) & 0xff);
             }
 
             cairo_surface_mark_dirty(order_surf);

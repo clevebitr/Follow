@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "cache.h"
@@ -18,11 +19,7 @@
 
 #include "config.h"
 
-/* 解析 [cache] dir：
- *   NULL / ""    → <用户缓存目录>/follow（默认）
- *   "~/xxx"      → <家目录>/xxx
- *   "D:/xxx"     → 原样（规范化）
- *   "cache/xxx"  → 相对当前工作目录 */
+/* 解析缓存目录；NULL / 空 = 用户缓存目录/follow。 */
 static gchar *cache_dir_resolve(const gchar *raw)
 {
     if (raw == NULL || *raw == '\0')
@@ -39,7 +36,7 @@ static gchar *cache_dir_resolve(const gchar *raw)
 
 gchar *follow_cache_dir(void)
 {
-    static gchar *resolved = NULL;      /* 配置只会 load 一次，结果算一遍就够 */
+    static gchar *resolved = NULL;
 
     if (resolved == NULL) {
         resolved = cache_dir_resolve(config_get()->cache_dir);

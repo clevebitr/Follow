@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <string.h>
@@ -19,32 +20,27 @@
 #include "config.h"
 #include "httpstream.h"
 
-/* 每次请求取多少字节。
- * 实测 googlevideo 对 rqh=1 的地址有块大小上限：bytes=0-1048575（1MB）是 206，
- * 再大（1.25MB / 2MB / 4MB）就 403，所以上限取 1MB；万一哪天更小，
- * stream_fill() 会自动砍半重试。 */
+/* 每块 1MB；googlevideo 对更大的 range 返回 403。 */
 #define CHUNK_BYTES (1024 * 1024)
 #define CHUNK_MIN   (64 * 1024)
 
 typedef struct {
     gchar  *url;
-    gchar  *headers;             /* "Key: Value\r\n..."，可为 NULL */
+    gchar  *headers;
     gchar  *ua;
 
-    gsize   chunk;               /* 当前一次请求的大小（装不下会砍半） */
-    guint8 *buf;                 /* 当前这一块的原始数据 */
+    gsize   chunk;
+    guint8 *buf;
     gsize   buf_len;
     gsize   buf_pos;
-    gint64  buf_off;             /* buf[0] 对应的文件偏移 */
+    gint64  buf_off;
 
-    gint64  offset;              /* 下一次要交付的字节位置 */
-    gint64  size;                /* 文件总长，-1 = 还不知道 */
+    gint64  offset;
+    gint64  size;
     gboolean eof;
-    int      status;             /* 最近一次的 HTTP 状态码 */
+    int      status;
     gchar    error[CURL_ERROR_SIZE];
 } Stream;
-
-/* ---------- libcurl 回调 ---------- */
 
 static size_t stream_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
@@ -52,7 +48,7 @@ static size_t stream_write_cb(char *ptr, size_t size, size_t nmemb, void *userda
     gsize   n = size * nmemb;
 
     if (s->buf_len + n > CHUNK_BYTES) {
-        n = CHUNK_BYTES - s->buf_len;          /* 服务器没按 Range 返回值：只留一块 */
+        n = CHUNK_BYTES - s->buf_len;          /* 服务器忽略 Range 时只保留一块。 */
         if (n == 0)
             return 0;
     }
@@ -63,7 +59,7 @@ static size_t stream_write_cb(char *ptr, size_t size, size_t nmemb, void *userda
     return size * nmemb;
 }
 
-/* 只关心 Content-Range，里面带着文件总长（bytes a-b/total） */
+/* Content-Range 提供文件总长。 */
 static size_t stream_header_cb(char *data, size_t size, size_t nmemb, void *userdata)
 {
     Stream *s = userdata;
@@ -84,7 +80,6 @@ static size_t stream_header_cb(char *data, size_t size, size_t nmemb, void *user
     return n;
 }
 
-/* 发一次请求，取 s->chunk 字节。成功（拿到数据）返回 TRUE */
 static gboolean stream_fetch(Stream *s)
 {
     CURL              *curl;
@@ -99,7 +94,7 @@ static gboolean stream_fetch(Stream *s)
     s->buf_off = s->offset;
 
     if (s->size >= 0 && s->offset >= s->size)
-        return FALSE;                          /* 到末尾了 */
+        return FALSE;
 
     end = s->offset + (gint64)s->chunk - 1;
     if (s->size > 0 && end > s->size - 1)
@@ -159,8 +154,7 @@ static gboolean stream_fetch(Stream *s)
 
     curl_easy_cleanup(curl);
 
-    /* 206 = 正常的分块响应；200 说明服务器忽略了 Range，
-     * 只有从 0 开始取时这份数据才是对的。 */
+    /* 206 为分块响应；200 仅从 0 开始取时有效。 */
     if (status != 206 && status != 200)
         return FALSE;
 
@@ -173,7 +167,7 @@ static gboolean stream_fetch(Stream *s)
     return s->buf_len > 0;
 }
 
-/* 取一块：块太大被拒（403）就砍半再来，直到成功或缩到 CHUNK_MIN */
+/* 403 时块大小减半重试。 */
 static gboolean stream_fill(Stream *s)
 {
     for (;;) {
@@ -188,8 +182,6 @@ static gboolean stream_fill(Stream *s)
         s->chunk /= 2;
     }
 }
-
-/* ---------- AVIOContext 回调 ---------- */
 
 static int stream_read(void *opaque, uint8_t *out, int want)
 {
@@ -247,7 +239,6 @@ static int64_t stream_seek(void *opaque, int64_t off, int whence)
     if (target < 0 || (s->size >= 0 && target > s->size))
         return AVERROR(EINVAL);
 
-    /* 落在已缓冲的范围里就只挪游标，否则作废缓冲，下次读的时候重新取 */
     if (target >= s->buf_off && target <= s->buf_off + (gint64)s->buf_len) {
         s->buf_pos = (gsize)(target - s->buf_off);
     } else {
@@ -261,8 +252,6 @@ static int64_t stream_seek(void *opaque, int64_t off, int whence)
 
     return target;
 }
-
-/* ---------- 对外接口 ---------- */
 
 AVIOContext *httpstream_avio_open(const char *url, const char *headers, gchar **error)
 {
@@ -287,7 +276,6 @@ AVIOContext *httpstream_avio_open(const char *url, const char *headers, gchar **
     s->chunk   = CHUNK_BYTES;
     s->size    = -1;
 
-    /* 先取第一块：既探到总长，也让后续读取不用再等网络 */
     if (!stream_fill(s)) {
         if (error != NULL) {
             *error = g_strdup_printf("网络流打不开（HTTP %d%s%s）", s->status,
@@ -303,8 +291,7 @@ AVIOContext *httpstream_avio_open(const char *url, const char *headers, gchar **
         return NULL;
     }
 
-    /* 这块缓冲由 FFmpeg 负责释放，
-     * 必须用 av_malloc 系列分配，不能给 g_malloc 的指针。 */
+    /* 缓冲由 FFmpeg 释放，必须使用 av_malloc。 */
     iobuf = av_malloc(4096);
     pb    = avio_alloc_context(iobuf, 4096, 0, s, stream_read, NULL, stream_seek);
 
@@ -322,7 +309,7 @@ AVIOContext *httpstream_avio_open(const char *url, const char *headers, gchar **
     }
 
     pb->seekable = AVIO_SEEKABLE_NORMAL;
-    pb->direct   = 1;          /* 我们已经有 2MB 的块缓冲，不用 AVIO 再包一层 */
+    pb->direct   = 1;
 
     g_debug("httpstream: %s (%" G_GINT64_FORMAT " bytes)", url, s->size);
 

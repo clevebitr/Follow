@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #ifndef FOLLOW_LAYOUT_H
@@ -17,40 +18,36 @@
 typedef struct {
     double pad_x, pad_y;
 
-    /* 左列：备注 / 大时钟 / 歌词 */
-    double left_x;              /* 文本栏左边界（备注 / 时钟 / 歌词 / 统计） */
+    double left_x;
     double left_w;
     double note_px, note_y;
     double clock_px, clock_y, clock_w, clock_h;
     double lyric_px, lyric_y, lyric_w;
-    double lyric_bottom;        /* 歌词可视区域下沿（提示行上方，不会压到统计卡片） */
-    double lyric_next_px;       /* 预显示的下一行字号（和当前行同号） */
-    double lyric_area_h;        /* 歌词可视区域高度（lyric_y -> lyric_bottom） */
-    double lyric_gap;           /* 当前行 -> 下一行 的间距 */
-    double lyric_slot_h;        /* 一行歌词的固定槽高（两行字高） */
-    double hint_px, hint_y;     /* SHUFFLE / REPEAT / LRC 偏移 */
+    double lyric_bottom;
+    double lyric_next_px;
+    double lyric_area_h;
+    double lyric_gap;
+    double lyric_slot_h;
+    double hint_px, hint_y;
 
-    /* 右列：封面 + 进度条 / 曲名 / 二维码 + 胶囊 */
-    double col_x, col_cx, col_w;   /* 封面列左边界 / 中心 / 宽度 */
+    double col_x, col_cx, col_w;
     double card_pad, card_radius;
     double cover_px, cover_y, cover_card_y, cover_card_h;
     double bar_x, bar_y, bar_w, bar_h;
     double title_px, title_x, title_y, title_w;
-    double next_px;                                        /* NEXT 卡片文字字号 */
+    double next_px;
     double qr_px, qr_y, cell_w, cell_gap;
     double badge_h, badge_y, badge_w;
 
-    /* NEXT 预告（叠放卡片）：位于曲名与二维码之间 */
     double next_x, next_y, next_w, next_h;
 
-    /* 统计块（无衬底）：左侧热力图 + 右侧墙钟 / 收听时长 */
-    double stats_x, stats_y, stats_w, stats_h;          /* 整块外框 */
-    double stats_heat_x, stats_heat_y;                  /* 热力图左上角 */
-    double stats_heat_dy;                              /* 热力图相对墙钟排版框顶部的偏移 */
-    double stats_ink_bot;                              /* 文字墨迹下沿（相对排版框顶部） */
-    double stats_bottom;                               /* 统计块视觉底边（与 NEXT 卡共线） */
-    double stats_text_x;                                /* 文字列左边界 */
-    double stats_wall_y, stats_line_y;                  /* 墙钟 / 时长行上沿 */
+    double stats_x, stats_y, stats_w, stats_h;
+    double stats_heat_x, stats_heat_y;
+    double stats_heat_dy;
+    double stats_ink_bot;
+    double stats_bottom;
+    double stats_text_x;
+    double stats_wall_y, stats_line_y;
     double stats_clock_px, stats_px;
     double heat_cell, heat_gap, heat_h;
     double stats_gap_clock, stats_gap_heat;
@@ -58,27 +55,20 @@ typedef struct {
     int n_qr;
 } Layout;
 
-/* 歌词槽位（layout 与 lyricgl 共用，修改此处两边同时生效）：
- * 预推出列 / 当前句 / 预演一 / 预演二 各占一个“两行字高”的固定槽，
- * 槽高与折行数无关，因此行距不随长句变化。 */
+/* 歌词四槽：预推出列 / 当前句 / 预演一 / 预演二；槽高固定。 */
 #define LYRIC_SLOT_N    4
 #define LYRIC_SLOT_ROWS 2
-#define LYRIC_ROW_EM    1.30    /* 单行文字行高与字号之比 */
-#define LYRIC_CLOCK_MIN 0.85    /* 为歌词区让位时时钟的最小缩放比例 */
-#define LYRIC_W_GROW    1.20    /* 歌词列宽至少为时钟宽度的该倍数 */
-#define LYRIC_W_MIN     0.46    /* 歌词列宽至少为窗口宽度的该比例 */
-#define TITLE_LINES     2       /* 曲名最多换几行（封面列宽度有限） */
+#define LYRIC_ROW_EM    1.30
+#define LYRIC_CLOCK_MIN 0.85
+#define LYRIC_W_GROW    1.20
+#define LYRIC_W_MIN     0.46
+#define TITLE_LINES     2
 
-/* 歌词槽高度（逻辑像素） */
 double lyric_slot_h(double px);
 
-/* 计算整屏几何。
- *   clock_text 用于测量时钟宽度
- *   n_qr 0 / 1 / 2：无二维码、单个、并排两个
- *   stats_wall / stats_line 为统计卡片的两行文字，用于测量行高；
- *   NULL 表示按空内容测量 */
+/* 计算整屏几何；clock_text 与 stats_* 用于测量。 */
 void layout_compute(Layout *L, cairo_t *cr, double w, double h,
                     const char *clock_text, int n_qr,
                     const char *stats_wall, const char *stats_line);
 
-#endif /* FOLLOW_LAYOUT_H */
+#endif

@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "backdropgl.h"
@@ -135,8 +136,6 @@ static GLint g_part_u_tex;
 
 static VizGlVertex g_verts[VIZ_GL_MAX_VERTS];
 
-/* ---------------- 资源 ---------------- */
-
 static void build_particle_texture(void)
 {
     guchar *pixels = g_malloc0((gsize)PARTICLE_TEX * PARTICLE_TEX * 4);
@@ -261,8 +260,6 @@ static gboolean ensure_resources(void)
     return TRUE;
 }
 
-/* ---------------- 绘制 ---------------- */
-
 static void update_textures(const BackdropFrame *f)
 {
     if (f->base_gen != g_base_gen) {
@@ -361,8 +358,7 @@ static void draw_particles(const BackdropFrame *f, double w, double h)
 static void draw_scrim(void)
 {
     glEnable(GL_BLEND);
-    /* RGB 压暗，但保留背景已经写好的 alpha = 1，
-     * 否则整块 GLArea 会变成半透明。 */
+    /* 保留 alpha = 1，避免 GLArea 半透明。 */
     glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA,
                         GL_ZERO, GL_ONE);
 
@@ -450,8 +446,7 @@ static void on_unrealize(GtkWidget *widget, gpointer data)
     (void)widget;
     (void)data;
 
-    /* GtkGLArea 隐藏 / 重新映射时上下文会换一个，旧的 program / texture
-     * 全部作废；下次 realize 重新建。 */
+    /* 上下文重建后需重新创建资源。 */
     g_ready        = FALSE;
     g_base_tex     = 0;
     g_prev_tex     = 0;
@@ -479,8 +474,6 @@ static void on_destroy(GtkWidget *widget, gpointer data)
     g_base_gen      = -1;
     g_prev_gen      = -1;
 }
-
-/* ---------------- 对外接口 ---------------- */
 
 GtkWidget *backdropgl_new(void)
 {

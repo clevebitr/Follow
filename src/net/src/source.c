@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <string.h>
@@ -45,7 +46,7 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
         return 0;
     }
 
-    /* 页面链接：先看解析缓存，命中就不打 API（直链过期由 player 负责失效重试） */
+    /* 先查解析缓存。 */
     if (resolvecache_load(uri, out))
         return 0;
 
@@ -74,7 +75,7 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
         out->title    = title;
         out->artist   = artist;
         out->resolved = TRUE;
-        out->ranged   = TRUE;   /* googlevideo 只认定长 Range 请求 */
+        out->ranged   = TRUE;   /* googlevideo 需要定长 Range 请求。 */
 
         resolvecache_save(uri, out);
         g_message("source: youtube -> %s (%s)", title != NULL ? title : "?", audio_url);
@@ -112,7 +113,6 @@ int source_resolve(const char *uri, MediaSource *out, gchar **error)
         return 0;
     }
 
-    /* 其它 http(s) 直链：原样交给解码器 */
     out->url = g_strdup(uri);
     return 0;
 }

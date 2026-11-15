@@ -4,25 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
- */
-
-/* 
- * 分工：
- *   main.c     生命周期、键盘、定时器
- *   player.c   播放控制、网络解析、曲目信息
- *   lyricview  歌词加载、在线源、偏移、当前行
- *   cover.c    封面加载（本地 / 网络缓存）与绘制
- *   backdrop   动态背景（模糊封面 + 漂移的种子色；GPU 失败时的 CPU 回退）
- *   backdropgl 动态背景 GPU 层（光斑 / 粒子 / 压暗 shader）
- *   wallgl     歌曲墙 GPU 层（磁贴纹理 + 相机 / 选中 / 淡入）
- *   glutil     墙 / 背景共用的 shader、纹理上传、HiDPI 工具
- *   qrcard     二维码槽、平台胶囊
- *   layout     一次绘制用到的所有几何量
- *   stage      主画面（大时钟 / 备注 / 歌词 / 右列 / 统计）
- *   help       F1 快捷键页
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #if defined(_WIN32)
@@ -81,14 +66,30 @@
 #ifndef CONFIG_PATH
 #define CONFIG_PATH "src/config.ini"
 #endif
+#ifndef CONFIG_LOCAL_PATH
+#define CONFIG_LOCAL_PATH "src/config.local.ini"
+#endif
 #define TICK_MS     100
 
 App app;
 
+/* 优先使用 FOLLOW_CONFIG；其次同目录的 config.local.ini；最后是通用 config.ini。 */
+static const gchar *active_config_path(void)
+{
+    const gchar *env = g_getenv("FOLLOW_CONFIG");
+
+    if (env != NULL && *env != '\0')
+        return env;
+
+    if (g_file_test(CONFIG_LOCAL_PATH, G_FILE_TEST_IS_REGULAR))
+        return CONFIG_LOCAL_PATH;
+
+    return CONFIG_PATH;
+}
+
 static gboolean on_tick(gpointer data);
 static gboolean on_anim_tick(gpointer data);
 
-/* clock 100ms */
 #if defined(_WIN32)
 static void apply_window_edge(GtkWidget *window)
 {
@@ -114,7 +115,7 @@ static void apply_window_edge(GtkWidget *window)
         DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
         DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
                               &corner, sizeof(corner));
-        /* 透明阴影区在 DComp 下会被画成黑边，直接关掉非客户区渲染。 */
+        /* DComp 下透明阴影区会呈现黑边，关闭非客户区渲染。 */
         DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY,
                               &nc, sizeof(nc));
     }
@@ -175,11 +176,11 @@ static gboolean on_anim_tick(gpointer data)
     gboolean wall_gpu    = wall_open && wallgl_ready();
     gboolean wall_cpu    = wall_open && !wall_gpu;
     gboolean pending     = playlist_frame_pending();
-    /* 歌词换行过渡：画布不可见时不算活跃（否则会空转） */
+    /* 画布不可见时不驱动歌词动画。 */
     gboolean lyric_anim  = fx_running(&app.fx_lyric) && app.canvas != NULL &&
                            gtk_widget_get_visible(app.canvas);
     gboolean next_anim   = stage_next_animating();
-    /* 缩略图淡入期间也要持续重绘，否则封面要等下一次整点重绘才出现 */
+    /* 封面淡入期间保持重绘。 */
     gboolean cover_anim  = app.canvas != NULL &&
                            gtk_widget_get_visible(app.canvas) &&
                            covercache_animating();
@@ -188,13 +189,10 @@ static gboolean on_anim_tick(gpointer data)
 
     (void)data;
 
-    /* 窗口拖动或缩放期间不发动画重绘 */
     if (app.win_dragging)
         return G_SOURCE_CONTINUE;
 
-    /* GL 墙由 wallgl 的 frame clock tick 在 vsync 上重建；这个 16ms 泵
-     * 只在 pending 时 queue_draw，让 tick 持续跑。墙控件在开 / 关时会被
-     * 隐藏，tick 会通过 map / unmap 信号重新挂上。 */
+    /* GL 墙由 frame clock 驱动，此定时器仅触发 queue_draw。 */
     if (wall_gpu && pending && app.wallgl != NULL)
         gtk_widget_queue_draw(app.wallgl);
 
@@ -224,8 +222,7 @@ void ui_animate(void)
         app.anim_id = g_timeout_add(16, on_anim_tick, NULL);
 }
 
-/* 动态背景泵：间隔由 [ui] backdrop_fps 决定（默认 30fps）。
- * 相位推进在 backdrop_tick 里按实际间隔走，所以改帧率不会改变动画速度。 */
+/* 动态背景定时器；帧率取自 [ui] backdrop_fps。 */
 static void backdrop_timer_start(void)
 {
     gint fps = config_backdrop_fps();
@@ -256,9 +253,8 @@ void ui_sync_layers(void)
     if (wallgl_ready())
         warm_done = TRUE;
 
-    /* 关墙后把 GLArea 真正隐藏：在 DComp 下 GtkGLArea 是原生子表面，
-     * 单纯把 opacity 设成 0 不一定能让它从画面上消失。第一次启动时
-     * 先留着它预热，2 秒内还没 ready（没有 GPU）就不再等。 */
+    /* DComp 下 GtkGLArea 为原生子表面，隐藏时需真正 unmap；
+ * 首次启动保留 2 秒用于预热。 */
     show_wallgl = wall_open ||
                   (!warm_done && now - warm_start < 2 * G_USEC_PER_SEC);
 
@@ -271,17 +267,14 @@ void ui_sync_layers(void)
     if (app.bg_picture != NULL)
         gtk_widget_set_visible(app.bg_picture, !wall_full && !gpu_bg);
 
-    /* 墙全屏时主画布完全被盖住；退出动画期间要留着它垫在主界面下面。 */
     if (app.canvas != NULL)
         gtk_widget_set_visible(app.canvas, !gpu_wall);
 
-    /* 歌词 GPU 层跟着主画布：墙打开 / 关闭、帮助页都要同步 */
     if (app.lyricgl != NULL)
         gtk_widget_set_visible(app.lyricgl,
                                !wall_open && !app.help && !gpu_wall &&
                                !details_is_open());
 
-    /* GL 墙的表头 / 底栏在 chrome 层；cairo 回退时 chrome 由画布一起画。 */
     if (app.chrome != NULL)
         gtk_widget_set_visible(app.chrome, wall_open && wallgl_ready());
 }
@@ -346,7 +339,7 @@ static gboolean on_tick(gpointer data)
 
     lyricview_sync(position);
 
-    /* 元数据：切歌时加载（本地库命中就同步完成），状态变化时刷新详情页和封面 */
+    /* 切歌时加载元数据；状态变化时刷新详情页与封面。 */
     {
         static gint  meta_track = -2;
         static guint meta_ver   = 0;
@@ -358,7 +351,6 @@ static gboolean on_tick(gpointer data)
             metadata_load_track(track);
             meta_ver = metadata_version();
 
-            /* 本地库命中时元数据是同步就绪的：立刻把封面补上 */
             cover_apply_metadata();
 
             if (details_is_open())
@@ -390,7 +382,6 @@ static gboolean on_tick(gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
-/* keyboard */
 void ui_toggle_fullscreen(void)
 {
     GtkWindow *window = GTK_WINDOW(app.window);
@@ -401,11 +392,10 @@ void ui_toggle_fullscreen(void)
         gtk_window_fullscreen(window);
 }
 
-/* 用系统默认程序打开配置文件：先走 GIO，Windows 上再退回 ShellExecuteW，
- * 最后退回记事本。成功返回 NULL，失败返回可展示的错误文本。 */
+/* 打开配置文件：GIO → ShellExecuteW → notepad。 */
 gchar *ui_open_config_file(void)
 {
-    g_autofree gchar *path = g_canonicalize_filename(CONFIG_PATH, NULL);
+    g_autofree gchar *path = g_canonicalize_filename(active_config_path(), NULL);
 
     if (!g_file_test(path, G_FILE_TEST_EXISTS))
         return g_strdup_printf("找不到配置文件：%s", path);
@@ -419,12 +409,11 @@ gchar *ui_open_config_file(void)
         g_autofree gchar *uri   = g_filename_to_uri(path, NULL, NULL);
         gboolean          ok    = FALSE;
 
-        /* 不给 launch context 时 GLib 会打 g_app_launch_context CRITICAL */
         if (uri != NULL)
             ok = g_app_info_launch_default_for_uri(uri, context, &error);
 
         g_clear_object(&context);
-        g_clear_error(&error);   /* 失败就交给下面的平台兜底 */
+        g_clear_error(&error);
 
         if (ok)
             return NULL;
@@ -468,7 +457,7 @@ void ui_reload_config(void)
     if (old_track != NULL)
         old_pic = g_strdup(old_track->pic);
 
-    cfg = config_load(CONFIG_PATH);
+    cfg = config_load(active_config_path());
 
     keymap_init();
     viz_configure(config_viz_effect(), config_viz_particles(), config_viz_gain());
@@ -506,7 +495,6 @@ void ui_reload_config(void)
 
     player_update_window_title();
 
-    /* [ui] backdrop_fps 可能改了：按新间隔重挂定时器 */
     backdrop_timer_start();
 
     app.chrome_dirty = TRUE;
@@ -514,7 +502,7 @@ void ui_reload_config(void)
     ui_animate();
 
     g_message("config: reloaded %s (%" G_GSIZE_FORMAT " tracks)",
-              CONFIG_PATH, cfg->n_tracks);
+              active_config_path(), cfg->n_tracks);
 }
 
 static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
@@ -527,7 +515,6 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)keycode;
     (void)data;
 
-    /* 性能检测层在任何页面都能开关（包括帮助页 / 歌曲墙） */
     if (keymap_match(KEY_PERF, keyval, state)) {
         perf_toggle();
         return TRUE;
@@ -550,7 +537,6 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
                 return TRUE;
             }
 
-            /* 其他按键留给输入框，不要触发全局快捷键。 */
             return FALSE;
         }
 
@@ -560,11 +546,9 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         }
     }
 
-    /* 详情页：自己的选择 / 重搜 / 关闭逻辑，其他键一律吞掉 */
     if (details_is_open())
         return details_key(keyval, state);
 
-    /* 快捷键页：只认帮助 / 返回 / 退出，其他键一律吞掉 */
     if (app.help) {
         if (keymap_match(KEY_HELP, keyval, state) ||
             keymap_match(KEY_BACK, keyval, state)) {
@@ -588,7 +572,6 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         return TRUE;
     }
 
-    /* 播放列表页：方向键选磁贴、回车播放、Tab / Esc 关闭 */
     if (playlist_is_open()) {
         if (keymap_match(KEY_PLAYLIST, keyval, state) ||
             keymap_match(KEY_BACK, keyval, state)) {
@@ -746,7 +729,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
     return FALSE;
 }
 
-/* 鼠标：歌曲墙的拖动 / 滚轮 / 悬停 / 点击 */static void on_canvas_released(GtkGestureClick *gesture, int n_press,
+static void on_canvas_released(GtkGestureClick *gesture, int n_press,
                                double x, double y, gpointer data)
 {
     (void)gesture;
@@ -819,10 +802,6 @@ static gboolean on_canvas_scroll(GtkEventControllerScroll *controller,
     return TRUE;
 }
 
-/* ---------- agent 调试通道的输入注入（uidbg） ---------- */
-
-/* 命令面板是真实 GTK 控件：它开着的时候 Enter/↑/↓/Esc 走面板自己的
- * 选中逻辑（palette_debug_steps），其他键交给全局快捷键。 */
 gboolean uidbg_hook_key(guint keyval, GdkModifierType state)
 {
     if (palette_is_open()) {
@@ -909,13 +888,10 @@ void uidbg_hook_text(const gchar *text)
     if (entry == NULL)
         return;
 
-    /* 设文字会触发 "changed"，面板自己重新过滤 / 选中第一项 */
     gtk_editable_set_text(GTK_EDITABLE(entry), text != NULL ? text : "");
 }
 
-
-/* 墙的鼠标事件：GL 墙打开时 canvas 会被隐藏、chrome 是最上面的接收层；
- * cairo 回退时事件仍然落在 canvas 上。两个控件各自挂一套控制器。 */
+/* 墙的鼠标事件：GL 墙与 cairo 回退分别挂载控制器。 */
 static void attach_wall_input(GtkWidget *widget)
 {
     GtkGesture         *click  = gtk_gesture_click_new();
@@ -940,8 +916,7 @@ static void attach_wall_input(GtkWidget *widget)
     gtk_widget_add_controller(widget, scroll);
 }
 
-/* 窗口销毁时先把定时器和控件指针收干净：GApplication 的 shutdown
- * 比窗口销毁晚一步，晚到的 tick 不能再碰已经释放的 canvas。 */
+/* 窗口销毁时停止定时器并清空控件指针。 */
 static void on_window_destroy(GtkWidget *widget, gpointer data)
 {
     (void)widget;
@@ -1002,7 +977,6 @@ static gboolean debug_close_wall(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-/* 开发 / 性能测试用：自动开播（FOLLOW_AUTOPLAY） */
 static gboolean debug_autoplay(gpointer data)
 {
     (void)data;
@@ -1089,10 +1063,7 @@ static void on_fullscreen_changed(GObject *object, GParamSpec *pspec,
     }
 }
 
-/* 无边框窗口：仅接管边缘缩放，交给 GDK 的拖拽上下文（内部按屏幕坐标
- * 跟踪指针）。按客户区坐标自行计算位移会与窗口移动形成负反馈。
- * 标题栏拖动不接管：GtkWindowHandle 的手势会走 gdk_toplevel_begin_move，
- * 同一次拖动不能由两处实现同时处理。 */
+/* 无边框窗口仅接管边缘缩放；标题栏拖动由 GtkWindowHandle 处理。 */
 static void on_window_drag_begin(GtkGestureDrag *gesture, double x, double y,
                                  gpointer data)
 {
@@ -1141,12 +1112,10 @@ static void on_window_drag_begin(GtkGestureDrag *gesture, double x, double y,
             GTK_EVENT_CONTROLLER(gesture)));
     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 
-    /* 缩放期间暂停动画重绘 */
     app.win_dragging = TRUE;
     lyricgl_drag_state(TRUE);
 }
 
-/* 缩放结束或被中断：GDK 的拖拽上下文自行收尾，此处恢复动画 */
 static void window_drag_finish(void)
 {
     if (!app.win_dragging)
@@ -1205,7 +1174,6 @@ static void activate(GtkApplication *app_, gpointer user_data)
     if (cfg->fullscreen)
         gtk_window_fullscreen(GTK_WINDOW(window));
 
-    /* background */
     app.bg_picture = gtk_picture_new();
     gtk_picture_set_content_fit(GTK_PICTURE(app.bg_picture), GTK_CONTENT_FIT_FILL);
     gtk_picture_set_can_shrink(GTK_PICTURE(app.bg_picture), TRUE);
@@ -1213,20 +1181,14 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_widget_set_vexpand(app.bg_picture, TRUE);
     gtk_widget_add_css_class(app.bg_picture, "bg-picture");
 
-    /* pic */
     app.canvas = gtk_drawing_area_new();
     gtk_widget_set_hexpand(app.canvas, TRUE);
     gtk_widget_set_vexpand(app.canvas, TRUE);
     gtk_widget_add_css_class(app.canvas, "canvas");
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.canvas), stage_render, NULL, NULL);
 
-    /* 歌曲墙：GL 层画磁贴，透明 chrome 层画表头 / 底栏。
-     * GL 墙打开时 canvas 被隐藏，chrome 是顶层接收层；cairo 回退时
-     * 事件仍然落在 canvas 上。 */
     app.wallgl = wallgl_new();
 
-    /* 歌词：GL 层只画歌词（字形纹理 + shader 辉光 / 模糊），
-     * 背景透明，盖在主画布上。没有 GL 时 canvas 自己画。 */
     app.lyricgl = lyricgl_new();
 
     app.chrome = gtk_drawing_area_new();
@@ -1237,7 +1199,6 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.chrome),
                                    stage_chrome_render, NULL, NULL);
 
-    /* 动态背景：优先 GL；上下文 / shader 失败时保持 GtkPicture 的 CPU 路径。 */
     app.bg_gl = backdropgl_new();
 
     overlay = gtk_overlay_new();
@@ -1254,10 +1215,8 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.wallgl);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.chrome);
 
-    /* 命令面板放最上层，右下角；列表在输入框上方，向上展开。 */
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), palette_new());
 
-    /* 性能检测层：F12 开关，叠在最上面（can_target = FALSE，不吃鼠标） */
     app.perf = perf_new(window);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.perf);
 
@@ -1277,7 +1236,6 @@ static void activate(GtkApplication *app_, gpointer user_data)
         gtk_box_append(GTK_BOX(root_box), overlay);
 
         gtk_window_set_child(GTK_WINDOW(window), root_box);
-        /* CSD 的 12px 阴影区在 DComp 下会变成黑边，直接去掉外框。 */
         gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
 
         gtk_widget_set_visible(handle,
@@ -1330,14 +1288,12 @@ static void activate(GtkApplication *app_, gpointer user_data)
     app.repeat       = cfg->repeat;
     app.shuffle      = cfg->shuffle;
 
-    /* 启动时先把第 0 首的资料摆上去，按下 Space 才开始播放 */
     cover_set(config_track_at(cfg, 0));
     qrcard_update(config_track_at(cfg, 0));
     player_update_window_title();
 
     gtk_window_present(GTK_WINDOW(window));
 
-    /* agent 调试通道：只有 FOLLOW_UIDBG 打开时才监听端口 */
     if (g_getenv("FOLLOW_UIDBG") != NULL)
         uidbg_start(window);
 
@@ -1350,7 +1306,6 @@ static void activate(GtkApplication *app_, gpointer user_data)
     backdrop_push(cfg->width, cfg->height);
     backdrop_timer_start();
 
-    /* 开发 / 性能测试用：自动开墙、定时退出。 */
     if (g_getenv("FOLLOW_WALL_AUTO") != NULL)
         g_timeout_add(1200, debug_open_wall, NULL);
 
@@ -1393,13 +1348,15 @@ static void startup(GtkApplication *app_, gpointer user_data)
         g_warning("media engine init failed");
 #endif
 
-    if (!g_file_test(CONFIG_PATH, G_FILE_TEST_EXISTS)) {
-        g_warning("config file is not found in: %s (using defaults)", CONFIG_PATH);
+    if (!g_file_test(active_config_path(), G_FILE_TEST_EXISTS)) {
+        g_warning("config file is not found in: %s (using defaults)",
+                  active_config_path());
     } else {
-        g_message("config: loading %s (cwd = %s)", CONFIG_PATH, g_get_current_dir());
+        g_message("config: loading %s (cwd = %s)", active_config_path(),
+                  g_get_current_dir());
     }
 
-    config_load(CONFIG_PATH);
+    config_load(active_config_path());
     metadata_init();
     settings_load();
 
@@ -1429,8 +1386,7 @@ static void startup(GtkApplication *app_, gpointer user_data)
               keymap_label(KEY_PLAYLIST), keymap_label(KEY_DETAILS),
               keymap_label(KEY_HELP));
 
-    /* [net] proxy 同时也交给 FFmpeg：curl 走 CURLOPT_PROXY，
-     * 解码器（avformat 的 http）只认环境变量，两边都指到同一个代理。 */
+    /* 代理同时传给 curl 与 FFmpeg（后者只读环境变量）。 */
     if (config_proxy() != NULL) {
         g_setenv("http_proxy",  config_proxy(), TRUE);
         g_setenv("https_proxy", config_proxy(), TRUE);
@@ -1517,10 +1473,8 @@ int main(int argc, char **argv)
 #if defined(_WIN32)
     SetConsoleOutputCP(CP_UTF8);
 
-    /* GTK 4.24 的 Win32 后端默认不创建 DirectComposition 设备，GSK 于是
-     * 一直退回 cairo 软件合成，2K 全屏墙每帧都要把 GL 纹理读回内存。
-     * 打开 dcomp 后 GSK 才能用 GL 渲染器；驱动不支持时 GTK 会自己退回
-     * cairo。想强制关掉可以设 FOLLOW_DCOMP=0 或 GSK_RENDERER=cairo。 */
+    /* GTK 4.24 Win32 默认不创建 DirectComposition 设备，
+ * 启用 dcomp 后才使用 GL 渲染器。 */
     if (g_strcmp0(g_getenv("FOLLOW_DCOMP"), "0") != 0 &&
         g_strcmp0(g_getenv("GSK_RENDERER"), "cairo") != 0) {
         const gchar *cur = g_getenv("GDK_DEBUG");
@@ -1537,8 +1491,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    /* 调试用：FOLLOW_APP_ID_OVERRIDE 換个 app id，就能和已经在跑的那份并存。
-     * GtkApplication 是单实例的，不带它时第二份会直接把活交给第一份就退出。 */
+    /* 覆盖 app id 以便多实例调试。 */
     {
         const gchar *own_id = g_getenv("FOLLOW_APP_ID_OVERRIDE");
 

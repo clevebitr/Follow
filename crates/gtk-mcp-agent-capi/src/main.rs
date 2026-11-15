@@ -1,17 +1,8 @@
-//! Follow 的 MCP 调试服务（stdio）。
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Follow MCP 调试服务（stdio）。
 //!
-//! 架构：
-//!
-//! ```text
-//! Follow (GTK/C)                    gtk-mcp-agent (Rust)          pi
-//! ┌───────────────┐  TCP JSONL    ┌──────────────────┐  stdio  ┌────┐
-//! │ src/ui/uidbg.c│◄─────────────►│ tools.rs / client│◄───────►│ MCP│
-//! │ 127.0.0.1:7878│               │ 压缩成短文本      │         └────┘
-//! └───────────────┘               └──────────────────┘
-//! ```
-//!
-//! 应用侧的 C 调试通道是「一行一个 JSON」的请求/响应；这里把它翻成 MCP 工具，
-//! 并把 JSON 压成省 token 的短文本。截图只是兜底手段。
+//! C 侧 uidbg（127.0.0.1:7878）提供 JSON 行协议；本进程将其封装为 MCP 工具，
+//! 并将响应压缩为短文本。
 
 mod client;
 mod fmt;
@@ -78,7 +69,7 @@ fn main() {
         let method = request.get("method").and_then(Value::as_str).unwrap_or("");
         let params = request.get("params").cloned().unwrap_or(Value::Null);
 
-        // 通知（没有 id）不需要回包
+        // 通知无需响应
         let Some(id) = id else { continue };
 
         let response = match dispatch(method, &params, &client) {

@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "wallgl.h"
@@ -20,7 +21,6 @@
 #include "perf.h"
 #include "playlist.h"
 
-/* 一块单位四边形，用 uniform 的 u_rect 摆到屏幕坐标。 */
 static const char *VS =
     "#version 330 core\n"
     "layout(location = 0) in vec2 a_pos;\n"
@@ -53,7 +53,7 @@ static const char *FS =
 #define GLOW_SIZE           128
 #define OVERLAY_PAD           4
 
-/* 纹理缓存预算。2K / 4K 上磁贴纹理比 1080p 大很多，不能只按条数算。 */
+/* 纹理缓存按字节预算淘汰。 */
 #define TILE_CACHE_BUDGET    (96u * 1024u * 1024u)
 #define OVERLAY_CACHE_BUDGET (24u * 1024u * 1024u)
 
@@ -91,7 +91,6 @@ static TexItem g_overlays[OVERLAY_CACHE_MAX];
 static gsize   g_tile_bytes;
 static gsize   g_overlay_bytes;
 
-/* 环境变量 FOLLOW_WALL_DEBUG=1 时的帧时间统计 */
 static gint   g_dbg_uploads;
 static gint   g_dbg_frames;
 static double g_dbg_ms;
@@ -101,8 +100,6 @@ static gint64 now_us(void)
 {
     return g_get_monotonic_time();
 }
-
-/* ---------------- shader / 资源 ---------------- */
 
 static gboolean build_program(void)
 {
@@ -121,7 +118,7 @@ static gboolean build_program(void)
     return TRUE;
 }
 
-/* 选中磁贴的柔光：一张白色径向 alpha 图，绘制时用 u_color 染色。 */
+/* 选中柔光纹理。 */
 static void build_glow(void)
 {
     guchar *pixels = g_malloc0((gsize)GLOW_SIZE * GLOW_SIZE * 4);
@@ -135,7 +132,6 @@ static void build_glow(void)
             guchar v  = (guchar)CLAMP(a * 255.0, 0.0, 255.0);
             guchar *p = pixels + ((gsize)y * GLOW_SIZE + x) * 4;
 
-            /* 预乘 alpha 的白色 */
             p[0] = p[1] = p[2] = p[3] = v;
         }
     }
@@ -174,8 +170,6 @@ static gboolean ensure_resources(void)
     return TRUE;
 }
 
-/* ---------------- 纹理 ---------------- */
-
 static GLuint upload_surface(cairo_surface_t *surface)
 {
     GLuint tex = gl_util_texture_from_surface(surface);
@@ -201,7 +195,7 @@ static int cache_pick(TexItem *items, int count)
     return slot;
 }
 
-/* 按预算淘汰最久未使用的纹理。need 是新纹理的字节数。 */
+/* 按预算淘汰最久未使用纹理。 */
 static void cache_trim(TexItem *items, int count, gsize *bytes, gsize budget,
                        gsize need)
 {
@@ -298,8 +292,7 @@ static GLuint tile_texture(const WallGlTile *tile, int scale)
     surface = playlist_tile_surface_cached(tile->track, w, h, scale);
 
     if (surface == NULL) {
-        /* 磁贴纹理还没生成：先继续用同一张的旧版本（避免封面加载后闪白），
-         * 同时把它交给 playlist 的低优先级预热队列。 */
+        /* 纹理未生成时沿用旧版本并触发预热。 */
         playlist_tile_request(tile->track, w, h, scale);
 
         if (fallback >= 0) {
@@ -346,8 +339,6 @@ static GLuint overlay_texture(const WallGlTile *tile, int scale)
                                                tile->current, scale));
 }
 
-/* ---------------- 绘制 ---------------- */
-
 static void quad(double x, double y, double w, double h, GLuint tex,
                  double r, double g, double b, double a)
 {
@@ -380,7 +371,6 @@ static void draw_tint(void)
 
     diag = hypot(f->view_w, f->view_h);
 
-    /* Folia: radial-gradient at 14% 12% (accent) + 86% 82% (secondary) */
     rr = diag * 0.30;
     cx = f->view_w * 0.14;
     cy = f->view_h * 0.12;
@@ -397,7 +387,7 @@ static void draw_tint(void)
     glUseProgram(0);
 }
 
-/* 磁贴纹理还在后台生成时的占位色：用封面主色压暗，避免白块。 */
+/* 占位色：封面主色压暗。 */
 static void draw_tile_placeholder(double x, double y, double w, double h,
                                   gsize track)
 {
@@ -430,7 +420,6 @@ static void draw_wall(int scale)
     glUniform2f(g_u_offset, 0.0f, (float)f->offset_y);
     glUniform1i(g_u_tex, 0);
 
-    /* 1) 非选中磁贴 */
     for (int i = 0; i < f->n_tiles; i++) {
         const WallGlTile *t = &f->tiles[i];
         GLuint            tex;
@@ -443,13 +432,10 @@ static void draw_wall(int scale)
         if (tex == 0)
             draw_tile_placeholder(t->x, t->y, t->w, t->h, t->track);
         else
-            /* 磁贴纹理自己已经包含“占位底 + 封面”两个版本；封面到齐后
-             * 用新版本替换。这里不再乘 reveal，否则封面异步加载期间
-             * 整块磁贴（包括标题文字）都会是透明的。 */
+            /* 磁贴纹理内含占位与封面两个版本。 */
             quad(t->x, t->y, t->w, t->h, tex, 1.0, 1.0, 1.0, 1.0);
     }
 
-    /* 2) 非选中的悬停 / 当前曲目标记 */
     for (int i = 0; i < f->n_tiles; i++) {
         const WallGlTile *t = &f->tiles[i];
 
@@ -461,12 +447,10 @@ static void draw_wall(int scale)
              overlay_texture(t, scale), 1.0, 1.0, 1.0, 1.0);
     }
 
-    /* 3) 压暗中间区域 */
     if (sel != NULL && f->dim_bottom > f->dim_top)
         quad(0.0, f->dim_top, f->view_w, f->dim_bottom - f->dim_top,
              0, 0.0, 0.0, 0.0, 0.30);
 
-    /* 4) 选中磁贴：柔光 → 本体 → 描边 */
     if (sel != NULL) {
         double pop = CLAMP(f->selected_pop, 0.5, 2.0);
         double cx  = sel->x + sel->w * 0.5;
@@ -500,8 +484,7 @@ static void draw_wall(int scale)
     glUseProgram(0);
 }
 
-/* gtk_widget_set_opacity 每帧都调会把 GLArea 逼进离屏合成。
- * 只在进场 / 退场时改变，稳定在 1.0。 */
+/* 避免每帧 set_opacity 触发离屏合成。 */
 static void set_opacity(float target)
 {
     target = (float)CLAMP(target, 0.0, 1.0);
@@ -542,13 +525,11 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
-    /* 目标 alpha 保持不变：GLArea 整体必须是不透明的，
-     * 否则中间的压暗区会让下面的图层透出来。 */
+    /* GLArea 必须保持不透明。 */
     glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA,
                         GL_ZERO, GL_ONE);
 
-    /* 关掉墙时保持 framebuffer 全透明：GLArea 仍然可以留在窗口里预热，
-     * 不会盖住下面的主画面。 */
+    /* 关闭时保持 framebuffer 透明。 */
     if (!g_active) {
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -594,7 +575,6 @@ static void on_map(GtkWidget *widget, gpointer data)
 {
     (void)data;
 
-    /* 新映射的 GL framebuffer 是空的，强制下一帧重建。 */
     g_frame.view_w = -1.0;
     g_frame.view_h = -1.0;
 
@@ -650,8 +630,7 @@ static void on_realize(GtkWidget *widget, gpointer data)
         g_tick_id = gtk_widget_add_tick_callback(widget, on_tick, NULL, NULL);
 }
 
-/* 由 GTK 的 frame clock 驱动：在 vsync 上重建一帧并提交绘制。
- * 16ms 泵只在 pending 时 queue_draw，让这个回调持续被调用。 */
+/* 由 frame clock 驱动重建。 */
 static gboolean on_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 {
     int w, h;
@@ -677,8 +656,6 @@ static gboolean on_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
-/* ---------------- 对外接口 ---------------- */
-
 static void frame_reset(void)
 {
     g_frame.n_tiles  = 0;
@@ -703,7 +680,7 @@ static void on_unrealize(GtkWidget *widget, gpointer data)
         g_tick_id = 0;
     }
 
-    /* 上下文销毁后所有 GL 对象都失效；纹理从 playlist 的 cairo 缓存重新上传。 */
+    /* 上下文销毁后纹理需重新上传。 */
     for (int i = 0; i < TILE_CACHE_MAX; i++)
         memset(&g_tiles[i], 0, sizeof(g_tiles[i]));
     for (int i = 0; i < OVERLAY_CACHE_MAX; i++)
@@ -738,7 +715,7 @@ GtkWidget *wallgl_new(void)
     g_frame.selected = -1;
     g_opacity        = -1.0f;
 
-    /* 没有 GPU / 驱动不支持 GL 3.3 时的显式回退开关 */
+    /* 无 GL 3.3 时显式回退。 */
     if (g_strcmp0(g_getenv("FOLLOW_WALLGL"), "0") == 0) {
         g_failed = TRUE;
         area = gtk_drawing_area_new();

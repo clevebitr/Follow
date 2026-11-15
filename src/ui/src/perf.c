@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/12
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "perf.h"
@@ -21,20 +22,19 @@
 #include "ui.h"
 #include "wallgl.h"
 
-#define PERF_RING        240       /* 帧间隔环形缓冲：60fps 约 4 秒 */
-#define PERF_SPARK       120       /* 面板上画的柱子数 */
-#define PERF_IDLE_GAP    100000    /* > 100ms 的间隔算空闲，不进稳定帧统计 */
-#define PERF_HITCH_US    500000    /* 长帧统计上限：再长就是窗口被挡住 / 没画面 */
-#define PERF_STALL_MS    50.0      /* 超过这个间隔算一次卡顿 */
-#define PERF_WINDOW_US   2000000   /* 帧率统计窗口：最近 2 秒 */
-#define PERF_UPDATE_MS   200       /* 面板刷新间隔 */
-#define PERF_ROTATE_US   950000    /* 每秒折算一次各层调用频率 */
+#define PERF_RING        240
+#define PERF_SPARK       120
+#define PERF_IDLE_GAP    100000    /* 超过 100ms 的间隔视为空闲。 */
+#define PERF_HITCH_US    500000
+#define PERF_STALL_MS    50.0      /* 超过此值计为卡顿。 */
+#define PERF_WINDOW_US   2000000
+#define PERF_UPDATE_MS   200
+#define PERF_ROTATE_US   950000
 
 #define PERF_PANEL_W     344.0
 #define PERF_PAD         14.0
 #define PERF_ROW_H       15.0
 
-/* 面板上的行：把两个 phase 合成一行（背景 GL / CPU 回退共用"bg"） */
 #define PERF_ROWS        5
 
 typedef struct {
@@ -43,8 +43,8 @@ typedef struct {
 } Gap;
 
 typedef struct {
-    double sum_ms;    /* 当前统计窗口内的总耗时 */
-    guint  calls;     /* 当前统计窗口内的调用次数 */
+    double sum_ms;
+    guint  calls;
 } PhaseStat;
 
 static struct {
@@ -54,7 +54,6 @@ static struct {
     gboolean       on;
     guint          timer;
 
-    /* 帧 */
     Gap    ring[PERF_RING];
     guint  ring_i;
     guint  ring_n;
@@ -66,16 +65,14 @@ static struct {
     guint  spark_i;
     guint  spark_n;
 
-    /* 各层耗时 */
     gint64    start[PERF_PHASE_COUNT];
     PhaseStat ph[PERF_PHASE_COUNT];
-    double    rate[PERF_PHASE_COUNT];   /* 每秒调用次数（上一个窗口） */
-    double    ms[PERF_PHASE_COUNT];     /* 每次调用平均耗时 */
+    double    rate[PERF_PHASE_COUNT];
+    double    ms[PERF_PHASE_COUNT];
     gint64    win_start;
     gsize     upload_bytes;
     double    upload_mbps;
 
-    /* 面板显示用快照 */
     gboolean idle;
     double   fps;
     double   frame_ms;
@@ -83,14 +80,12 @@ static struct {
     double   p95_ms;
     double   worst_ms;
     double   cpu_pct;
-    guint    stalls;      /* 最近 2 秒里 > PERF_STALL_MS 的间隔个数 */
+    guint    stalls;
 } P;
 
 static const Rgba perf_ok   = { 0.62, 0.86, 0.72, 0.90 };
 static const Rgba perf_warn = { 0.95, 0.78, 0.45, 0.92 };
 static const Rgba perf_bad  = { 0.95, 0.52, 0.52, 0.92 };
-
-/* ---------------- 帧时钟采样 ---------------- */
 
 static void on_after_paint(GdkFrameClock *clock, gpointer data)
 {
@@ -109,8 +104,7 @@ static void on_after_paint(GdkFrameClock *clock, gpointer data)
         if (P.ring_n < PERF_RING)
             P.ring_n++;
 
-        /* 空闲期的间隔（比如没东西可画、只有面板自己在刷）不画进柱子，
-         * 否则一屏全是几百毫秒的红条，看不出真实负载。 */
+        /* 空闲间隔不计入帧率柱状图。 */
         if (gap <= PERF_IDLE_GAP) {
             P.spark[P.spark_i] = (double)gap / 1000.0;
             P.spark_i = (P.spark_i + 1) % PERF_SPARK;
@@ -158,8 +152,6 @@ static void bind_clock(void)
     }
 }
 
-/* ---------------- 埋点 ---------------- */
-
 void perf_phase_begin(PerfPhase phase)
 {
     if (phase < 0 || phase >= PERF_PHASE_COUNT)
@@ -194,8 +186,6 @@ void perf_note_upload(gsize bytes)
     P.upload_bytes += bytes;
 }
 
-/* ---------------- 统计 ---------------- */
-
 static void reset_stats(void)
 {
     memset(P.ring, 0, sizeof(P.ring));
@@ -226,7 +216,6 @@ static void reset_stats(void)
     P.stalls       = 0;
 }
 
-/* 每约 1 秒把「调用次数 / 总耗时」折成频率和平均耗时 */
 static void rotate_window(gint64 now)
 {
     double span;
@@ -249,7 +238,7 @@ static void rotate_window(gint64 now)
         P.rate[i] = (double)s->calls / span;
         P.ms[i]   = s->calls > 0 ? s->sum_ms / (double)s->calls : 0.0;
 
-        /* 每秒花掉的毫秒数 / 10 = 单核占用百分比 */
+        /* 单核占用百分比。 */
         P.cpu_pct += s->sum_ms / span / 10.0;
 
         s->calls  = 0;
@@ -280,7 +269,6 @@ static void refresh_frames(gint64 now)
     }
 
     if (n < 8) {
-        /* 最近 2 秒几乎没有持续重绘：画面是静止的，报「空闲」比报 0fps 清楚 */
         P.idle     = TRUE;
         P.fps      = 0.0;
         P.frame_ms = 0.0;
@@ -294,7 +282,7 @@ static void refresh_frames(gint64 now)
     P.idle = FALSE;
     P.fps  = (double)n * 1000000.0 / (double)sum;
 
-    /* 帧间隔分布：插入排序，最多 240 个数 */
+    /* 插入排序（最多 240 项）。 */
     for (guint i = 1; i < n; i++) {
         double v = ms[i];
         guint  j = i;
@@ -311,8 +299,7 @@ static void refresh_frames(gint64 now)
     P.p50_ms   = ms[(guint)((double)(n - 1) * 0.50)];
     P.p95_ms   = ms[(guint)((double)(n - 1) * 0.95)];
 
-    /* 长帧 / 卡顿单独统计：只能看「稳定性」，不能用刷新率的倍数当阈值
-     * （背景本来就是 30fps 泵，按 1.5× 刷新率算会把每个正常帧都标成掉帧）。 */
+    /* 长帧按固定阈值统计，不使用刷新率倍数。 */
     P.worst_ms = 0.0;
     P.stalls   = 0;
 
@@ -332,8 +319,6 @@ static void refresh_frames(gint64 now)
     }
 }
 
-/* ---------------- 绘制 ---------------- */
-
 static void draw_stat_row(cairo_t *cr, double x, double y, double w,
                           const char *name, double ms, double rate,
                           double refresh_ms)
@@ -349,7 +334,6 @@ static void draw_stat_row(cairo_t *cr, double x, double y, double w,
     if (rate < 0.5) {
         text_draw(cr, "-", &small, x + 66.0, y, TEXT_LEFT, 0.0);
 
-        /* 这一层这一秒没画：留一根空槽，读数位置不会左右跳 */
         color_set(cr, col_faint);
         path_round_rect(cr, x + w - 96.0, y + 5.0, 96.0, 4.0, 2.0);
         cairo_fill(cr);
@@ -362,7 +346,6 @@ static void draw_stat_row(cairo_t *cr, double x, double y, double w,
     text_draw(cr, num, &value, x + 66.0, y, TEXT_LEFT, 0.0);
     text_draw(cr, freq, &small, x + 122.0, y, TEXT_LEFT, 0.0);
 
-    /* 调用频率相对显示器刷新率的小条：60/s 占满 */
     {
         double full = refresh_ms > 0.0 ? 1000.0 / refresh_ms : 60.0;
         double k    = full > 0.0 ? CLAMP(rate / full, 0.0, 1.0) : 0.0;
@@ -390,7 +373,6 @@ static void draw_spark(cairo_t *cr, double x, double y, double w, double h,
     path_round_rect(cr, x, y, w, h, 4.0);
     cairo_fill(cr);
 
-    /* 一条 60Hz 参考线：柱子超过它就是掉到下一档 */
     ty = y + h - CLAMP(refresh_ms / scale_ms, 0.0, 1.0) * h;
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.16);
     cairo_set_line_width(cr, 1.0);
@@ -465,7 +447,6 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     in_x = x + pad;
     in_w = w - pad * 2.0;
 
-    /* 底：半透明深色 + 一圈细边，压在画面左上角 */
     color_set(cr, RGBA(0.020, 0.020, 0.025, 0.88));
     path_round_rect(cr, x, y, w, h, 10.0);
     cairo_fill_preserve(cr);
@@ -473,7 +454,6 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     cairo_set_line_width(cr, 1.0);
     cairo_stroke(cr);
 
-    /* 面板文字进 uidbg 的 perf 层：MCP 的 ui_screen 能直接读到这些读数 */
     uidbg_begin_layer(UIDBG_LAYER_PERF);
     uidbg_layer_clear(UIDBG_LAYER_PERF);
 
@@ -484,7 +464,6 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     text_draw(cr, right, &small, in_x + in_w - text_width(cr, right, &small),
               yy, TEXT_LEFT, 0.0);
 
-    /* 大字：帧率 */
     yy += 15.0;
     {
         TextStyle big = TEXT_STYLE(FONT_MONO, P.idle ? 19.0 : 27.0,
@@ -500,7 +479,6 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
             text_draw(cr, "fps", &unit, in_x + nw + 6.0, yy + 11.0,
                       TEXT_LEFT, 0.0);
 
-        /* 右侧：一帧多少毫秒 + 显示器刷新率 */
         {
             g_autofree gchar *frame = P.idle
                 ? g_strdup("-")
@@ -579,8 +557,6 @@ static void draw_overlay(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     uidbg_begin_layer(UIDBG_LAYER_STAGE);
 }
 
-/* ---------------- 生命周期 ---------------- */
-
 static gboolean on_update(gpointer data)
 {
     gint64 now = g_get_monotonic_time();
@@ -655,14 +631,12 @@ void perf_toggle(void)
         if (P.timer == 0)
             P.timer = g_timeout_add(PERF_UPDATE_MS, on_update, NULL);
 
-        /* 立刻出第一帧读数，不用等 200ms */
         on_update(NULL);
     } else if (P.timer != 0) {
         g_source_remove(P.timer);
         P.timer = 0;
 
-        /* 面板已经不画了：把 uidbg 里最后一帧的读数抹掉，别让
-         * ui_screen 读到已经不在画面上的文字 */
+        /* 关闭时清除 uidbg 中的面板文字。 */
         uidbg_layer_clear(UIDBG_LAYER_PERF);
     }
 }

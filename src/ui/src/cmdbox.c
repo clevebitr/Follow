@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/11
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 #include "cmdbox.h"
 #include <string.h>
@@ -69,7 +70,6 @@ static struct {
     gboolean    open;
     gboolean    updating;
 } P;
-/* ---------------- 工具 ---------------- */
 static void set_message(const gchar *text)
 {
     if (P.message == NULL)
@@ -142,7 +142,6 @@ static gchar *volume_detail(void)
         return g_strdup("muted");
     return g_strdup_printf("%.0f%%", settings_volume() * 100.0);
 }
-/* ---------------- 列表 ---------------- */
 static void select_index(int index)
 {
     GtkListBoxRow *row;
@@ -226,7 +225,6 @@ static void set_query(const gchar *text)
     gtk_editable_set_text(GTK_EDITABLE(P.entry), text != NULL ? text : "");
     P.updating = FALSE;
 }
-/* ---------------- 菜单 ---------------- */
 static void palette_show_root(gboolean clear_query);
 static void palette_show_volume(gboolean clear_query);
 static void palette_show_output(gboolean clear_query);
@@ -318,7 +316,6 @@ static void palette_show_viz(gboolean clear_query)
     add_item("Back", "返回", ACT_BACK, NULL);
     rebuild_rows();
 }
-/* ---------------- 执行 ---------------- */
 static void apply_volume(double volume, gboolean unmute)
 {
     volume = CLAMP(volume, 0.0, 1.0);
@@ -469,7 +466,6 @@ static void run_item(PaletteItem *item)
         break;
     }
 }
-/* ---------------- 事件 ---------------- */
 static void on_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data)
 {
     PaletteItem *item;
@@ -535,7 +531,6 @@ static gboolean on_entry_key(GtkEventControllerKey *controller, guint keyval,
     }
     return FALSE;
 }
-/* ---------------- 对外接口 ---------------- */
 GtkWidget *palette_new(void)
 {
     P.items = g_ptr_array_new();

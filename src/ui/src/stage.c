@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "stage.h"
@@ -31,7 +32,7 @@
 #include "ui.h"
 #include "wallgl.h"
 
-/* 时间统一 "00:00:26"：位数固定，宽度不会随秒数跳 */
+/* 时间格式固定宽度，避免秒数变化引起宽度跳动。 */
 static gchar *format_time(double seconds)
 {
     int total = (int)(MAX(seconds, 0.0) + 0.5);
@@ -40,7 +41,6 @@ static gchar *format_time(double seconds)
                            total / 3600, (total / 60) % 60, total % 60);
 }
 
-/* "3h 20m" / "12m" */
 static void format_span(guint seconds, gchar *buf, gsize len)
 {
     guint hours = seconds / 3600;
@@ -52,8 +52,7 @@ static void format_span(guint seconds, gchar *buf, gsize len)
         g_snprintf(buf, len, "%um", mins);
 }
 
-/* 播放错误 > 歌词请求中 > 歌词错误 > 加载中：这些占嵌在歌词位置上，
- * 用普通字重、淡色，和真正的歌词区分开 */
+/* 状态行优先级：播放错误 > 歌词请求 > 歌词错误 > 加载中。 */
 static const gchar *status_line(Rgba *color)
 {
     const gchar *error = media_error(&app.media);
@@ -94,18 +93,16 @@ static const gchar *current_note(void)
     return config_track_note(cfg, track);
 }
 
-
 static void draw_heatmap(cairo_t *cr, const Layout *L, double x, double y)
 {
     g_autoptr(GDateTime) now = g_date_time_new_now_local();
-    const int     today_wd = g_date_time_get_day_of_week(now) - 1;   /* 0 = 周一 */
+    const int     today_wd = g_date_time_get_day_of_week(now) - 1;
     const guint   max_sec  = stats_max_in_range(&app.stats, 84);
     const Rgba    seed     = app.palette.has
         ? RGBA(app.palette.seed_r, app.palette.seed_g, app.palette.seed_b, 1.0)
         : RGBA(0.60, 0.70, 0.95, 1.0);
     const double  step = L->heat_cell + L->heat_gap;
 
-    /* 最近 12 周，列 11 是本周*/
     for (int col = 0; col < 12; col++) {
         for (int row = 0; row < 7; row++) {
             int    days_ago = today_wd + (11 - col) * 7 - row;
@@ -133,7 +130,6 @@ static void draw_heatmap(cairo_t *cr, const Layout *L, double x, double y)
     }
 }
 
-/* "LISTENED 3h 20m  ·  TODAY 12m" */
 static gchar *stats_summary(void)
 {
     gchar total[32];
@@ -145,8 +141,6 @@ static gchar *stats_summary(void)
     return g_strdup_printf("LISTENED %s  ·  TODAY %s", total, today);
 }
 
-/* 热力图 + 墙钟 + 收听时长：无卡片衬底，位置全部由 layout_compute() 给出。
- * 热力图在左，高度与右侧两行文字的总高一致。 */
 static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gchar *line)
 {
     TextStyle wall_style = TEXT_STYLE(FONT_CLOCK, L->stats_clock_px, PANGO_WEIGHT_NORMAL,
@@ -157,26 +151,19 @@ static void draw_stats(cairo_t *cr, const Layout *L, const gchar *wall, const gc
 
     draw_heatmap(cr, L, L->stats_heat_x, L->stats_heat_y);
 
-    /* 限宽 = 文字列宽：极端窄窗口下用省略号收住 */
     text_draw(cr, wall, &wall_style, L->stats_text_x, L->stats_wall_y,
               TEXT_LEFT, text_w);
     text_draw(cr, line, &line_style, L->stats_text_x, L->stats_line_y,
               TEXT_LEFT, text_w);
 }
 
-/* 歌词。
- *
- * GPU 路径（默认）：把可视区域交给 lyricgl，排版 / 自动折行 / 弹簧 / 扫描头
- *   都在那一层里做（左对齐、按行绘制、没有辉光和模糊）。
- *
- * cairo 回退（没有 GL）：只画当前行 + 下一行，同样左对齐、自动折行、不发光。 */
+/* GPU 路径由 lyricgl 绘制；cairo 回退只绘制当前行与下一行。 */
 
-/* 当前句高亮色：取封面种子色并降低鲜艳度。保留色相，亮度上限 0.80、
- * 饱和度乘 0.55，再向白色混合 10%，与周围白字连贯且仍可区分。 */
-#define ACCENT_VALUE   0.80   /* 亮度上限 */
-#define ACCENT_FLOOR   0.66   /* 太暗的封面抬到这个亮度 */
-#define ACCENT_SATUR   0.55   /* 饱和度系数 */
-#define ACCENT_WHITE   0.10   /* 往白字混的比例 */
+/* 当前句高亮：封面种子色降饱和、限亮度，并混入少量白色。 */
+#define ACCENT_VALUE   0.80
+#define ACCENT_FLOOR   0.66
+#define ACCENT_SATUR   0.55
+#define ACCENT_WHITE   0.10
 
 static Rgba seed_accent(void)
 {
@@ -187,7 +174,6 @@ static Rgba seed_accent(void)
     double         mx = MAX(r, MAX(g, b));
     double         avg;
 
-    /* 亮度：过暗的抬高（保持色相），过亮的压低 */
     if (mx > 0.001 && mx < ACCENT_FLOOR) {
         double k = ACCENT_FLOOR / mx;
 
@@ -202,18 +188,15 @@ static Rgba seed_accent(void)
         b *= k;
     }
 
-    /* 饱和度：向同亮度灰靠拢，色相不变 */
     avg = (r + g + b) / 3.0;
     r   = avg + (r - avg) * ACCENT_SATUR;
     g   = avg + (g - avg) * ACCENT_SATUR;
     b   = avg + (b - avg) * ACCENT_SATUR;
 
-    /* 向白色轻微混合，使与白字的过渡更自然 */
     r += (1.0 - r) * ACCENT_WHITE;
     g += (1.0 - g) * ACCENT_WHITE;
     b += (1.0 - b) * ACCENT_WHITE;
 
-    /* 封面本身为灰时补一点冷色底，避免高亮与白字难以区分 */
     if (MAX(r, MAX(g, b)) - MIN(r, MIN(g, b)) < 0.06) {
         r += 0.02;
         g += 0.05;
@@ -228,8 +211,6 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
 {
     uidbg_begin_layer(UIDBG_LAYER_LYRIC);
 
-    /* 这一层每帧重画：先清掉上一帧的记录（GPU 路径下随后由 lyricgl
-     * 的 render 重建，cairo 路径下由下面的绘制重建） */
     uidbg_layer_clear(UIDBG_LAYER_LYRIC);
 
     if (lyricgl_ready()) {
@@ -240,32 +221,27 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
         geom.top    = L->lyric_y;
         geom.height = L->lyric_area_h;
         geom.px     = L->lyric_px;
-        geom.gap    = L->lyric_px * 0.55;   /* 行距（不含行内折行的行高） */
+        geom.gap    = L->lyric_px * 0.55;
 
-        /* 扫描头要的是"减掉歌词偏移之后"的播放位置 */
         geom.position_ms = (media_position(&app.media) * 1000.0)
                          - (double)app.lrc_offset_ms;
         geom.playing     = media_is_playing(&app.media);
         geom.accent      = seed_accent();
 
-        /* 歌词在 GPU 层画，布局 / 弹簧 / 扫描头都在 lyricgl 里；
-         * 它自己会把真实几何报给 uidbg（layer = lyric） */
         lyricgl_set_view(app.lyrics, app.lyric_index, &geom);
 
-        /* cairo 版的淡入淡出用不上了：把 fx 停掉，别让动画泵白空转 */
+        /* cairo 回退不使用歌词 FX。 */
         fx_stop(&app.fx_lyric);
 
         uidbg_begin_layer(UIDBG_LAYER_STAGE);
         return TRUE;
     }
 
-    /* ---------- cairo 回退 ---------- */
     {
         const double t    = fx_t(&app.fx_lyric);
         const double rise = L->lyric_px * 1.1;
         TextStyle    cur  = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_BOLD,
                                        L->lyric_px * 0.10, WHITE(0.96));
-        /* 没唱到 / 刚唱完的行用淡灰，白色只留给正在演出的那句 */
         TextStyle    nxt  = TEXT_STYLE(FONT_MONO, L->lyric_next_px, PANGO_WEIGHT_BOLD,
                                        L->lyric_next_px * 0.10,
                                        RGBA(0.76, 0.76, 0.80, 0.50));
@@ -274,7 +250,6 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
         gboolean     drew     = FALSE;
         double       y        = L->lyric_y + rise * (1.0 - t);
 
-        /* 只在歌词区域里画：不会渗到下面的提示行 / 统计卡片里 */
         cairo_save(cr);
         cairo_rectangle(cr, L->left_x, L->lyric_y, L->lyric_w, L->lyric_area_h);
         cairo_clip(cr);
@@ -325,18 +300,15 @@ static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
     const gchar *note = current_note();
     TextStyle    style;
 
-    /* 备注 */
     if (note != NULL) {
         style = TEXT_STYLE(FONT_MONO, L->note_px, PANGO_WEIGHT_NORMAL,
                            L->note_px * 0.16, WHITE(0.50));
         text_draw(cr, note, &style, L->left_x, L->note_y, TEXT_LEFT, L->left_w);
     }
 
-    /* 大时钟 */
     style = TEXT_STYLE(FONT_CLOCK, L->clock_px, PANGO_WEIGHT_NORMAL, 0.0, col_text);
     text_draw(cr, clock_text, &style, L->left_x, L->clock_y, TEXT_LEFT, 0.0);
 
-    /* 歌词 / 状态：有错误或加载中就先报状态，否则画歌词 */
     {
         Rgba         color = col_dim;
         const gchar *line  = status_line(&color);
@@ -344,7 +316,6 @@ static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
         if (line != NULL) {
             style = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_NORMAL,
                                L->lyric_px * 0.10, color);
-            /* 和歌词同一套左对齐锚点；放不下就省略号（只占一行） */
             text_draw_block(cr, line, &style, L->left_x, L->lyric_y,
                             TEXT_LEFT, L->lyric_w, 1);
             if (lyricgl_ready())
@@ -355,7 +326,6 @@ static void draw_left(cairo_t *cr, const Layout *L, const gchar *clock_text)
     }
 }
 
-/* 播放模式 / 歌词偏移：只在非默认状态出现，贴在统计卡片上沿 */
 static void draw_hint(cairo_t *cr, const Layout *L)
 {
     GString *mode;
@@ -386,15 +356,12 @@ static void draw_hint(cairo_t *cr, const Layout *L)
     g_string_free(mode, TRUE);
 }
 
-/* ---------- NEXT 预告卡片 ---------- */
+#define NEXT_ANIM_SEC 0.30
 
-#define NEXT_ANIM_SEC 0.30   /* 切卡动画时长 */
+static gint   g_next_shown = -2;
+static gint   g_next_from  = -1;
+static gint64 g_next_t0;
 
-static gint   g_next_shown = -2;   /* 上一次绘制时显示的曲目 */
-static gint   g_next_from  = -1;   /* 切换时被推回牌堆的曲目 */
-static gint64 g_next_t0;           /* 切换起始时间（0 = 静止） */
-
-/* 卡片的封面缩略图：取不到时触发加载，随后由动画泵重绘 */
 static cairo_surface_t *next_thumb(gint idx, double *alpha)
 {
     cairo_surface_t *img;
@@ -405,11 +372,9 @@ static cairo_surface_t *next_thumb(gint idx, double *alpha)
 
     *alpha = img != NULL ? 0.35 + 0.65 * covercache_reveal((gsize)idx) : 1.0;
 
-
     return img;
 }
 
-/* 画一张卡片：底卡 + 缩略图 + 曲名 / 艺人。dy / scale 用于推进动画 */
 static void next_card_paint(cairo_t *cr, const Layout *L, gint idx,
                             double alpha, double dy, double scale)
 {
@@ -437,7 +402,6 @@ static void next_card_paint(cairo_t *cr, const Layout *L, gint idx,
 
     card_draw(cr, L->next_x, L->next_y, L->next_w, L->next_h, L->card_radius * 0.8);
 
-    /* "NEXT" 作为卡片背景水印：右对齐、低对比，压在内容下面 */
     {
         TextStyle tag = TEXT_STYLE(FONT_MONO, L->next_px * 1.25, PANGO_WEIGHT_BOLD,
                                   L->next_px * 0.30, WHITE(0.11));
@@ -504,7 +468,6 @@ static void next_card_paint(cairo_t *cr, const Layout *L, gint idx,
     cairo_restore(cr);
 }
 
-/* 牌堆：两张错位的空卡片 */
 static void next_deck_paint(cairo_t *cr, const Layout *L, double lift)
 {
     double pad = L->next_h * 0.13;
@@ -521,7 +484,6 @@ static void next_deck_paint(cairo_t *cr, const Layout *L, double lift)
     }
 }
 
-/* NEXT 预告：小标题 + 叠放卡片。切歌时旧卡被推回牌堆、新卡自前方落位。 */
 static void draw_next_card(cairo_t *cr, const Layout *L)
 {
     gint64 now = g_get_monotonic_time();
@@ -548,12 +510,10 @@ static void draw_next_card(cairo_t *cr, const Layout *L)
     next_deck_paint(cr, L, k < 1.0 ? k : 1.0);
 
     if (k < 1.0) {
-        /* 旧卡：向后收、上移、淡出 */
         next_card_paint(cr, L, g_next_from, 1.0 - k, -L->next_h * 0.10 * k,
                         1.0 - 0.06 * k);
     }
 
-    /* 新卡：从后方放大落位 */
     {
         double e = 1.0 - pow(1.0 - k, 3.0);
 
@@ -567,8 +527,6 @@ gboolean stage_next_animating(void)
     return g_next_t0 != 0;
 }
 
-/* ---------- 右列：封面 + 进度条 / ♪ 曲名 ♪ / 二维码 ---------- */
-
 static void draw_right(cairo_t *cr, const Layout *L)
 {
     const double position = media_position(&app.media);
@@ -576,13 +534,11 @@ static void draw_right(cairo_t *cr, const Layout *L)
     g_autofree gchar *label = player_label();
     double card_x = L->col_cx - (L->cover_px + L->card_pad * 2.0) * 0.5;
 
-    /* 封面和进度条装在同一个衬底里 */
     card_draw(cr, card_x, L->cover_card_y, L->cover_px + L->card_pad * 2.0,
               L->cover_card_h, L->card_radius);
 
     cover_draw(cr, L->bar_x, L->cover_y, L->cover_px);
 
-    /* 进度条：封面下方 5px、和封面同宽；不显示总时长 */
     color_set(cr, WHITE(0.12));
     path_round_rect(cr, L->bar_x, L->bar_y, L->bar_w, L->bar_h, L->bar_h * 0.5);
     cairo_fill(cr);
@@ -604,7 +560,6 @@ static void draw_right(cairo_t *cr, const Layout *L)
         TextStyle         style = TEXT_STYLE(FONT_MONO, px, PANGO_WEIGHT_NORMAL,
                                             px * 0.05, col_text);
 
-        /* 曲名放不进封面列时先缩字号（下限 0.7），尽量保持单行、左右居中 */
         need = text_width(cr, title, &style);
 
         if (need > L->title_w && need > 0.0) {
@@ -622,9 +577,7 @@ static void draw_right(cairo_t *cr, const Layout *L)
     qrcard_draw(cr, L);
 }
 
-/* ---------- 主绘制 ---------- */
-
-/* 画一帧"现在的画面"。背景不在这里画：下面那层 GtkPicture 负责，这层是透明的。 */
+/* 主画面；背景由底层 backdrop 绘制。 */
 static void draw_stage(cairo_t *cr, int width, int height)
 {
     g_autoptr(GDateTime) now        = g_date_time_new_now_local();
@@ -637,7 +590,7 @@ static void draw_stage(cairo_t *cr, int width, int height)
 
     uidbg_begin_layer(UIDBG_LAYER_STAGE);
 
-    /* 布局和绘制用同一份文字：卡片尺寸就是按它量出来的，不会再"内容比卡片高" */
+    /* 布局与绘制使用同一份文字，避免尺寸不一致。 */
     layout_compute(&L, cr, (double)width, (double)height, clock_text, n_qr, wall, stats);
 
     draw_left(cr, &L, clock_text);
@@ -669,7 +622,7 @@ void stage_snapshot(void)
 
     cr = cairo_create(shot);
 
-    /* 快照只是给退场动画用的离屏副本：别让它把这一帧的元素再记一遍 */
+    /* 快照为离屏副本，不重复记录 uidbg。 */
     uidbg_suppress(TRUE);
     draw_stage(cr, w, h);
     uidbg_suppress(FALSE);
@@ -679,7 +632,6 @@ void stage_snapshot(void)
     g_clear_pointer(&app.snapshot, cairo_surface_destroy);
     app.snapshot = shot;
 
-    /* 比背景慢半拍、也更长一点：背景先退潮，组件随后撤桌重上 */
     fx_begin_later(&app.fx_stage, 0.85, 0.15);
     ui_animate();
 }
@@ -697,7 +649,7 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
     perf_phase_begin(PERF_PHASE_STAGE);
     uidbg_frame_begin();
 
-    /* 歌曲详情页：整屏页面，盖掉主画面（背景仍由 backdrop 那层提供） */
+    /* 详情页整屏覆盖主画面。 */
     if (details_is_open()) {
         details_draw(cr, (double)width, (double)height);
         uidbg_frame_end();
@@ -705,19 +657,14 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
         return;
     }
 
-    /* 播放列表是全屏页：盖掉 stage，只留下面那层动态背景 */
     if (playlist_is_open()) {
-        /* 退出歌曲墙时把主界面垫在下面，页面淡出时能看见它 */
         if (playlist_is_closing())
             draw_stage(cr, width, height);
 
-        /* GL 层可用时墙在 GPU 上画，并由 wallgl 的 frame clock 重建帧；
-         * 这张 cairo 画布保持透明（墙打开时会被隐藏）。
-         * 没有 GL 时退回整屏 cairo。 */
+        /* GL 墙由 wallgl 重建；无 GL 时整屏 cairo。 */
         if (!wallgl_ready()) {
             playlist_draw(cr, (double)width, (double)height);
 
-            /* 这一帧刚好播完退场：立刻把主界面补上，不留黑帧 */
             if (!playlist_is_open())
                 draw_stage(cr, width, height);
         }
@@ -730,8 +677,6 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
     p = app.snapshot != NULL ? fx_t(&app.fx_stage) : 1.0;
 
     if (app.snapshot != NULL && p < 1.0) {
-        /* 撤桌重上：旧画面整块往左退场（同时淡出），新画面从右边接上来。
-         * 和背景退潮同一个方向、同一条缓动曲线，两层叠在一起就是"交融"。 */
         cairo_save(cr);
         cairo_translate(cr, -p * (double)width, 0.0);
         cairo_set_source_surface(cr, app.snapshot, 0.0, 0.0);
@@ -745,7 +690,7 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
     } else {
         draw_stage(cr, width, height);
 
-        if (app.snapshot != NULL)          /* 过渡走完，快照可以扔了 */
+        if (app.snapshot != NULL)
             g_clear_pointer(&app.snapshot, cairo_surface_destroy);
     }
 
@@ -756,7 +701,6 @@ void stage_render(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoi
     perf_phase_end(PERF_PHASE_STAGE);
 }
 
-/* 墙的表头 / 底栏 / 帮助页：画在 GL 层上面的透明画布上，不参与磁贴绘制。 */
 void stage_chrome_render(GtkDrawingArea *area, cairo_t *cr, int width, int height,
                          gpointer data)
 {

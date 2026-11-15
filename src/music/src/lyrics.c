@@ -4,16 +4,17 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <string.h>
 
 #include "lyrics.h"
 
-/* [mm:ss.xx] → 毫秒。解析成功返回 TRUE。 */
+/* [mm:ss.xx] → 毫秒。 */
 static gboolean parse_timestamp(const gchar *tag, gint64 *out_ms)
 {
     const gchar *p = tag;
@@ -38,7 +39,6 @@ static gboolean parse_timestamp(const gchar *tag, gint64 *out_ms)
     if (digits == 0 || digits > 2)
         return FALSE;
 
-    /* 小数部分：'.' 或 ':' 分隔，1..3 位（.5 = 500ms，.05 = 50ms） */
     if (*p == '.' || *p == ':') {
         gint scale = 100;
 
@@ -63,12 +63,11 @@ static gboolean parse_timestamp(const gchar *tag, gint64 *out_ms)
     return TRUE;
 }
 
-/* 一段带时间的词：增强 LRC 的 <mm:ss.xx>、网易云 yrc 的 (start,dur,0) */
 typedef struct {
-    gint64 ms;      /* 起始时间 */
-    gint64 end_ms;  /* 结束时间（0 = 未知，用下一个词的起始 / 行尾） */
-    guint  off;     /* 在整行文本里的字节偏移 */
-    guint  len;     /* 字节数 */
+    gint64 ms;
+    gint64 end_ms;
+    guint  off;
+    guint  len;
 } RawWord;
 
 static GArray *words_new(void)
@@ -76,7 +75,7 @@ static GArray *words_new(void)
     return g_array_new(FALSE, TRUE, sizeof(RawWord));
 }
 
-/* 表项可能是 NULL（这行没有逐字时间），释放时要能接住 */
+/* 表项可能为 NULL。 */
 static void words_table_free(gpointer p)
 {
     if (p != NULL)
@@ -97,7 +96,6 @@ static void word_add(GArray *words, gint64 ms, gint64 end_ms, guint off, guint l
     g_array_append_val(words, w);
 }
 
-/* 把每段的结束时间补成"下一个词的起始"（最后一段留 0 = 未知） */
 static void words_fill_ends(GArray *words)
 {
     for (guint i = 0; i + 1 < words->len; i++) {
@@ -108,8 +106,6 @@ static void words_fill_ends(GArray *words)
     }
 }
 
-/* 去掉行内的 <mm:ss.xx> 标记，同时把每个 <...> 之后的文本段收成一个词：
- *   [00:12.00]<00:12.00>あ<00:12.50>い → 两个词，各有自己的起始时间 */
 static gchar *strip_inline_words(const gchar *text, gint64 line_start, GArray **out_words)
 {
     GString *out = g_string_sized_new(strlen(text) + 1);
@@ -127,7 +123,6 @@ static gchar *strip_inline_words(const gchar *text, gint64 line_start, GArray **
                 gint64             ms = 0;
 
                 if (parse_timestamp(inner, &ms)) {
-                    /* 收尾上一段（行首的 <t> 之前那段没有自己的时间，用行起始） */
                     word_add(words, pending, 0, seg_start, out->len - seg_start);
 
                     pending   = ms;
@@ -157,7 +152,6 @@ static gchar *strip_inline_words(const gchar *text, gint64 line_start, GArray **
     return g_string_free(out, FALSE);
 }
 
-/* 解析一个没有前导的整数（yrc 用），成功返回 TRUE 并前移 *pp */
 static gboolean parse_bare_int(const gchar **pp, gint64 *out)
 {
     const gchar *p = *pp;
@@ -178,7 +172,6 @@ static gboolean parse_bare_int(const gchar **pp, gint64 *out)
     return TRUE;
 }
 
-/* yrc 的一个词头：(start,dur[,flags]) */
 static gboolean parse_word_group(const gchar **pp, gint64 *start, gint64 *end_ms)
 {
     const gchar *p = *pp;
@@ -209,9 +202,7 @@ static gboolean parse_word_group(const gchar **pp, gint64 *start, gint64 *end_ms
     return TRUE;
 }
 
-/* 网易云逐字歌词（yrc）：
- *   [行起始,行时长](词起始,词时长,0)字(词起始,词时长,0)字...
- * 词时间是绝对毫秒。返回 TRUE 表示这行是 yrc。 */
+/* 解析网易云 yrc 逐字歌词。 */
 static gboolean parse_yrc_line(const gchar *line, gint64 *out_start,
                                gchar **out_text, GArray **out_words)
 {
@@ -240,7 +231,6 @@ static gboolean parse_yrc_line(const gchar *line, gint64 *out_start,
         guint        off;
 
         if (!parse_word_group(&next, &ws, &we)) {
-            /* 后面不是词头了：把剩下的文本补到最后一个词上，别把歌词吃掉 */
             if (words->len > 0) {
                 RawWord *last = &g_array_index(words, RawWord, words->len - 1);
 
@@ -251,9 +241,8 @@ static gboolean parse_yrc_line(const gchar *line, gint64 *out_start,
         }
 
         off = text->len;
-        p   = next;      /* 文本从词头后面开始 */
+        p   = next;
 
-        /* 这一段一直延伸到下一个词头（'(数字'）为止 */
         {
             const gchar *seg_end = p;
 
@@ -289,7 +278,7 @@ static gboolean parse_yrc_line(const gchar *line, gint64 *out_start,
     return TRUE;
 }
 
-/* 读文件并统一成 UTF-8（GBK/GB18030 会自动转） */
+/* 读取文件并转换为 UTF-8。 */
 static gchar *read_text_file(const char *path)
 {
     g_autofree gchar *content = NULL;
@@ -318,19 +307,16 @@ static gchar *read_text_file(const char *path)
         }
     }
 
-    /* 去 BOM */
     if (g_str_has_prefix(content, "\xef\xbb\xbf"))
         memmove(content, content + 3, strlen(content + 3) + 1);
 
     return g_steal_pointer(&content);
 }
 
-/* 解析的中间态：按文件顺序的行 + 可能缺失的时间戳（-1）。
- * 只是本文件内部用，外面只看到排好序、只有带时间戳行的 Lyrics。 */
 typedef struct {
     GPtrArray *texts;      /* gchar* */
-    GArray    *times;      /* gint64，-1 = 这行没有时间戳 */
-    GPtrArray *words;      /* GArray<RawWord>* 或 NULL，和 texts 一一对应 */
+    GArray    *times;
+    GPtrArray *words;
     gchar     *title;
     gchar     *artist;
 } RawLyrics;
@@ -348,7 +334,6 @@ static void raw_free(RawLyrics *raw)
     g_free(raw);
 }
 
-/* 从一段文本解析出原始行（time = -1 表示这行没有时间戳） */
 static RawLyrics *raw_from_text(const gchar *content)
 {
     RawLyrics        *raw;
@@ -370,7 +355,7 @@ static RawLyrics *raw_from_text(const gchar *content)
         gchar  *text;
         gint64  offset_ms = 0;
 
-        /* 网易云逐字歌词（yrc）：整行自带词级时间轴，不用再走 LRC 那套 */
+        /* 解析网易云 yrc 逐字歌词。 */
         {
             g_autofree gchar *ytext = NULL;
             GArray           *ywords = NULL;
@@ -424,11 +409,10 @@ static RawLyrics *raw_from_text(const gchar *content)
                 if (words != NULL)
                     g_array_unref(words);
                 g_array_free(stamps, TRUE);
-                continue;      /* 空行 / 纯元数据行 */
+                continue;
             }
 
             if (stamps->len == 0) {
-                /* 没有时间戳：也算一行，等打轴 */
                 gint64 missing = -1;
 
                 g_ptr_array_add(raw->texts, text);
@@ -462,11 +446,10 @@ static RawLyrics *raw_from_text(const gchar *content)
     return raw;
 }
 
-/* 构建 + 排序用：一行歌词 + 它自己的词时间表 */
 typedef struct {
     gint64  time_ms;
     gchar  *text;
-    GArray *words;      /* 借用 raw->words 里的元素 */
+    GArray *words;
 } TmpLine;
 
 static gint compare_lines(const void *a, const void *b, gpointer user_data)
@@ -481,8 +464,7 @@ static gint compare_lines(const void *a, const void *b, gpointer user_data)
     return 0;
 }
 
-/* 把一行的词时间表摊平成"每个字的绝对时间"。
- * 词内多个字按词时长线性均分；没有逐字时间的行返回 NULL（渲染时整行一起亮）。 */
+/* 展开为每个字的绝对时间；无逐字时间返回 NULL。 */
 static gint64 *build_char_times(const gchar *text, GArray *words,
                                gint64 line_start, gint64 line_end, gsize *out_n)
 {
@@ -498,7 +480,6 @@ static gint64 *build_char_times(const gchar *text, GArray *words,
 
     times = g_new(gint64, n);
 
-    /* 先按"整行起始"铺底，词没覆盖到的字就不会是垃圾值 */
     for (gsize i = 0; i < n; i++)
         times[i] = line_start;
 
@@ -529,13 +510,11 @@ static gint64 *build_char_times(const gchar *text, GArray *words,
         }
     }
 
-    /* 整行都没算出来（词时间无效）：当作"整行一起亮" */
     if (last == 0) {
         g_free(times);
         return NULL;
     }
 
-    /* 词没盖住的尾巴：接在最后一个词的结束时间上 */
     for (gsize i = last; i < n; i++)
         times[i] = last_end;
 
@@ -553,7 +532,7 @@ static Lyrics *lyrics_from_raw(RawLyrics *raw)
 
     tmp = g_new0(TmpLine, raw->texts->len + 1);
 
-    /* 只保留有时间戳的行（纯文本行没有时间，播放时没法用） */
+    /* 仅保留有时间戳的行。 */
     for (guint i = 0; i < raw->texts->len; i++) {
         gint64 ms = g_array_index(raw->times, gint64, i);
 
@@ -590,7 +569,6 @@ static Lyrics *lyrics_from_raw(RawLyrics *raw)
         lyrics->n_lines++;
     }
 
-    /* tmp 只借用 raw 的字符串，不负责释放 */
     g_free(tmp);
     raw_free(raw);
 
@@ -609,7 +587,6 @@ Lyrics *lyrics_load_text(const gchar *content)
     if (content == NULL)
         return NULL;
 
-    /* 在线源拿到的通常是 UTF-8；万一是 GBK 也兜一下 */
     if (!g_utf8_validate(content, -1, NULL)) {
         gsize  written = 0;
         gchar *converted = g_convert(content, -1, "UTF-8", "GB18030", NULL, &written, NULL);
@@ -694,8 +671,6 @@ gssize lyrics_index_at(const Lyrics *lyrics, double seconds)
     return (gssize)lo - 1;
 }
 
-/* 空行也算一行（很多 LRC 用只有时间戳的空行标前奏 / 间奏），
- * 但要当"有没有字"来判断 */
 static gboolean line_has_text(const Lyrics *lyrics, gsize index)
 {
     const gchar *text = lyrics->lines[index].text;
@@ -751,8 +726,7 @@ gssize lyrics_focus_at(const Lyrics *lyrics, double seconds)
     if (index < 0)
         return -1;
 
-    /* 当前正好落在“只有时间戳”的空行上（前奏 / 间奏 / 换段占位）：
-     * 上一句保持在场，不把整块歌词擦掉（AMLL 的 highlightedGroups 也是这个语义） */
+    /* 空行时保持上一句在场。 */
     if (line_has_text(lyrics, (gsize)index))
         return index;
 

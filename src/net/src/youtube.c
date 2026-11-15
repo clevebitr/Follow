@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <string.h>
@@ -394,7 +395,7 @@ int youtube_parse_player(const char *json, gchar **audio_url,
         }
     }
 
-    /* 自适应流全是加密的：退一步拿音视频合一的，至少能出声 */
+    /* 退回到音视频合一的流。 */
     if (pick.url == NULL) {
         formats = obj_array(streaming, "formats");
 
@@ -428,8 +429,6 @@ int youtube_parse_player(const char *json, gchar **audio_url,
     return 0;
 }
 
-/* ---------- 真正的解析流程 ---------- */
-
 static gchar *player_body(const YtClient *c, const gchar *video_id)
 {
     return g_strdup_printf(
@@ -460,8 +459,8 @@ int youtube_resolve(const char *page_url, gchar **audio_url,
 {
     g_autofree gchar *video_id = youtube_video_id(page_url);
     GString  *reasons;
-    gboolean  bot_check = FALSE;   /* 所有客户端都撞上人机验证 */
-    gchar    *fallback_url = NULL; /* 带 rqh 的保底地址 */
+    gboolean  bot_check = FALSE;   /* 所有客户端均触发人机验证。 */
+    gchar    *fallback_url = NULL; /* 保底地址。 */
     const gchar *fallback_client = NULL;
 
     if (audio_url != NULL) *audio_url = NULL;
@@ -486,8 +485,7 @@ int youtube_resolve(const char *page_url, gchar **audio_url,
         gchar *url = NULL;
 
         if (http_post_with_headers(YT_PLAYER_URL, body, headers, &resp, 12) != 0) {
-            /* 传输层就失败（DNS / 连接 / 超时）：所有客户端都是同一个域名，
-             * 再试别的只是白等，直接给出可操作的原因。 */
+            /* 传输层失败，直接返回可操作原因。 */
             if (error != NULL)
                 *error = g_strdup_printf(
                     "连不上 YouTube（%s）：请在 config.ini 的 [net] proxy 填代理地址",
@@ -508,9 +506,7 @@ int youtube_resolve(const char *page_url, gchar **audio_url,
         }
 
         if (youtube_parse_player(resp.body, &url, title, artist, &why) == 0) {
-            /* 带 rqh=1 的地址只能取开头约 1MB（后面的 range 一律 403），
-             * 播到一半就停、也 seek 不了。先留着当保底，继续试别的客户端，
-             * 能拿到不带 rqh 的就用更好的那个。 */
+            /* 带 rqh=1 的地址仅支持开头约 1MB。 */
             if (url_has_param(url, "rqh")) {
                 g_free(fallback_url);
                 fallback_url = url;
@@ -562,10 +558,9 @@ int youtube_resolve(const char *page_url, gchar **audio_url,
 
     if (error != NULL) {
         if (bot_check) {
-            /* 这不是代码问题：YouTube 按出口 IP 判断，机房 / 公共代理常被这样挡 */
+            /* 失败原因与出口 IP 有关。 */
             *error = g_strdup("YouTube 要人机验证：换个代理节点 / IP 再试");
         } else {
-            /* 界面上只有一行，只放第一个原因；全量在 debug 日志里 */
             *error = g_strdup_printf("YouTube 解析失败：%s",
                                      reasons->len > 0 ? reasons->str : "没给出音频");
         }

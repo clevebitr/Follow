@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "config.h"
@@ -53,8 +54,8 @@ static gint audio_group_number(const gchar *group)
     if (group == NULL || g_ascii_strncasecmp(group, "audio", 5) != 0)
         return -1;
 
-    p = group + 5;                         /* strlen("audio") */
-    if (*p == '\0')                        /* 光秃秃的 [audio] 不算 */
+    p = group + 5;
+    if (*p == '\0')
         return -1;
 
     for (; *p != '\0'; p++) {
@@ -78,11 +79,7 @@ static gint compare_track_groups(gconstpointer a, gconstpointer b, gpointer data
     return audio_group_number(ga) - audio_group_number(gb);
 }
 
-
-/* GKeyFile 不支持行内注释：`proxy = http://... ; 说明` 会把“; 说明”也算进值里，
- * 结果就是代理地址非法、请求直接失败（表面上看就像“代理没生效”）。
- * 这里统一砍掉值尾巴上的行内注释：只当 `;` / `#` 前面是空白、后面也是空白
- * 或行尾时才当注释，所以 `Mozilla/4.0 (compatible; MSIE 6.0)` 这种不会被误伤。 */
+/* 移除值末尾的行内注释（; 或 #，且前后均为空白）。 */
 static void config_strip_inline_comment(gchar *value)
 {
     gchar *p;
@@ -118,7 +115,7 @@ static gchar *config_get_string(GKeyFile *kf, const gchar *group, const gchar *k
     return value;
 }
 
-/* 整数 / 布尔也先当字符串读，这样 `timeout = 15   ; 秒` 同样能用 */
+/* 整数与布尔值先按字符串读取，允许行内注释。 */
 static gint config_get_int(GKeyFile *kf, const gchar *group, const gchar *key,
                            gint fallback)
 {
@@ -174,11 +171,7 @@ static double config_get_double(GKeyFile *kf, const gchar *group, const gchar *k
     return value;
 }
 
-/* 歌词偏移：写毫秒或秒都行，也接受后缀。
- *   2500 / 2500ms / 2.5s  → 2500 毫秒
- *   -7.5  / -7.5s         → -7500 毫秒
- * 规则：有 ms/s 后缀按后缀；没有后缀时 |值| >= 100 当毫秒，否则当秒
- * （老写法 2500 仍然有效，手写 -7.5 也能用 —— 原来整数解析会直接把小数丢掉）。 */
+/* 解析歌词偏移：支持 ms / s 后缀；无后缀时绝对值 >= 100 视为毫秒。 */
 static gint config_parse_offset_ms(const gchar *raw)
 {
     g_autofree gchar *text = NULL;
@@ -208,7 +201,6 @@ static gint config_parse_offset_ms(const gchar *raw)
 
     return (gint)llround(seconds ? value * 1000.0 : value);
 }
-
 
 static void audio_track_clear(AudioTrack *track)
 {
@@ -257,11 +249,11 @@ static void config_reset(void)
     g_config.qrcode_link = g_strdup(QRCODE_LINK);
     g_config.qrcode_label = NULL;
     g_config.note        = NULL;
-    g_config.repeat      = REPEAT_ALL;   /* 默认列表循环 */
+    g_config.repeat      = REPEAT_ALL;
     g_config.shuffle     = FALSE;
-    g_config.cache_dir   = NULL;         /* NULL = <用户缓存目录>/follow */
-    g_config.resolve_ttl    = 2700;      /* 45 分钟 */
-    g_config.audio_cache    = FALSE;     /* 默认不落音频 */
+    g_config.cache_dir   = NULL;
+    g_config.resolve_ttl    = 2700;
+    g_config.audio_cache    = FALSE;
     g_config.audio_max_mb   = 512;
     g_config.cover_max_mb   = 128;
     g_config.animations     = TRUE;
@@ -269,14 +261,14 @@ static void config_reset(void)
     g_config.viz_effect  = g_strdup("dust");
     g_config.viz_particles = 150;
     g_config.viz_gain      = 1.0;
-    g_config.user_agent  = NULL;         /* NULL = 内置的浏览器 UA */
-    g_config.proxy       = NULL;         /* NULL = 直连 */
-    g_config.http_timeout    = 0;        /* 0 = HTTP_DEFAULT_TIMEOUT */
-    g_config.connect_timeout = 0;        /* 0 = HTTP_DEFAULT_CONNECT_TIMEOUT */
+    g_config.user_agent  = NULL;
+    g_config.proxy       = NULL;
+    g_config.http_timeout    = 0;
+    g_config.connect_timeout = 0;
     g_config.metadata_enabled = TRUE;
     g_config.metadata_cover   = TRUE;
-    g_config.metadata_db      = NULL;    /* NULL = <cache>/follow/metadata.db */
-    g_config.metadata_user_agent = NULL; /* NULL = 项目专用 UA */
+    g_config.metadata_db      = NULL;
+    g_config.metadata_user_agent = NULL;
 
     memset(g_config.key_bind, 0, sizeof(g_config.key_bind));
 }
@@ -291,11 +283,10 @@ const APPconfig *config_get(void)
     return &g_config;
 }
 
-
 static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
 {
-    g_auto(GStrv) groups = NULL;        /* 由 keyfile 拥有内容，g_strfreev 释放外壳 */
-    gchar       **names;                /* 只借 groups 里的指针，别用 g_strfreev */
+    g_auto(GStrv) groups = NULL;
+    gchar       **names;
     gsize         n_groups = 0;
     gsize         n_names = 0;
 
@@ -396,11 +387,11 @@ gchar *config_track_title(const AudioTrack *track)
 
     base = g_path_get_basename(track->link);
 
-    query = strchr(base, '?');         /* 远程 URL 的 query 不要 */
+    query = strchr(base, '?');
     if (query != NULL)
         *query = '\0';
 
-    dot = strrchr(base, '.');          /* 去掉扩展名 */
+    dot = strrchr(base, '.');
     if (dot != NULL && dot != base)
         *dot = '\0';
 
@@ -419,7 +410,6 @@ gchar *config_track_label(const AudioTrack *track)
 
     return g_strdup(title != NULL ? title : "");
 }
-
 
 const APPconfig *config_load(const char *path)
 {
@@ -482,7 +472,6 @@ const APPconfig *config_load(const char *path)
         g_config.shuffle = config_get_bool(kf, "playback", "shuffle", g_config.shuffle);
     }
 
-    /* [cache] dir：缓存目录。支持 ~ 和相对路径，留空就用 <用户缓存>/follow */
     {
         g_autofree gchar *dir = config_get_string(kf, "cache", "dir");
 
@@ -499,7 +488,6 @@ const APPconfig *config_load(const char *path)
                                                g_config.cover_max_mb);
     }
 
-    /* [net]：UA 和两个超时；没写就用内置默认 */
     {
         g_autofree gchar *ua = config_get_string(kf, "net", "user_agent");
 
@@ -510,12 +498,10 @@ const APPconfig *config_load(const char *path)
         g_config.connect_timeout = config_get_int(kf, "net", "connect_timeout", 0);
     }
 
-    /* [ui] 动效总开关 / 动态背景刷新率 */
     g_config.animations = config_get_bool(kf, "ui", "animations", TRUE);
     g_config.backdrop_fps = config_get_int(kf, "ui", "backdrop_fps",
                                            g_config.backdrop_fps);
 
-    /* [net] proxy：YouTube 这类在国内需要代理，curl 和 FFmpeg 都用它 */
     {
         g_autofree gchar *proxy = config_get_string(kf, "net", "proxy");
 
@@ -523,7 +509,6 @@ const APPconfig *config_load(const char *path)
         g_config.proxy = (proxy != NULL && *proxy != '\0') ? g_steal_pointer(&proxy) : NULL;
     }
 
-    /* [metadata]：公开数据库查询 + 本地库缓存 */
     {
         g_autofree gchar *db = config_get_string(kf, "metadata", "db");
         g_autofree gchar *ua = config_get_string(kf, "metadata", "user_agent");
@@ -540,7 +525,6 @@ const APPconfig *config_load(const char *path)
             (ua != NULL && *ua != '\0') ? g_steal_pointer(&ua) : NULL;
     }
 
-    /* [visualizer] 背景粒子：off / dust / warp / flow */
     {
         g_autofree gchar *effect = config_get_string(kf, "visualizer", "effect");
 
@@ -552,7 +536,7 @@ const APPconfig *config_load(const char *path)
         g_config.viz_gain      = config_get_double(kf, "visualizer", "gain", 1.0);
     }
 
-    /* [keys]：值原样留着，由 keymap 统一解析；不认识的键名只记一条日志 */
+    /* [keys] 值保留原始字符串，由 keymap 统一解析。 */
     {
         gsize   n_keys = 0;
         g_auto(GStrv) keys = g_key_file_get_keys(kf, "keys", &n_keys, NULL);
@@ -644,8 +628,7 @@ gboolean config_metadata_cover(void)
 
 const gchar *config_metadata_user_agent(void)
 {
-    /* MusicBrainz 要求 UA 里带应用名 / 版本 / 联系方式，所以这里不用
-     * [net] 那个浏览器 UA；[metadata] user_agent 可以覆盖。 */
+    /* MusicBrainz 需要专用 UA；[metadata] user_agent 可覆盖。 */
     const APPconfig *cfg = config_get();
 
     if (cfg->metadata_user_agent != NULL && *cfg->metadata_user_agent != '\0')

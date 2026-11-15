@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #ifndef FOLLOW_KEYMAP_H
@@ -15,17 +16,7 @@
 #include <gdk/gdk.h>
 #include <glib.h>
 
-/* 按键绑定：ini 的 [keys] 组 → 动作。
- *
- *   [keys]
- *   play_pause = space
- *   next       = n, Page_Down
- *   playlist   = Tab
- *   fullscreen = f, F11
- *
- * 值可以用逗号 / 竖线分隔多个键；空值或 off / none 表示解绑。
- * 键名用 GDK 的名字（space / Left / F11 / bracketleft / Page_Up ...），
- * 也接受 esc / enter / pgup / pgdn 这些别名。可以带 ctrl+ / alt+ / shift+ / super+。 */
+/* 按键绑定：[keys] 组 → 动作。多键用逗号分隔，off / none 解绑。 */
 
 typedef enum {
     KEY_PLAY_PAUSE = 0,
@@ -61,12 +52,10 @@ void keymap_init(void);
 /* 释放 label 缓存，退出时调一次。 */
 void keymap_clear(void);
 
-/* 这个按键事件是否命中动作。没有写 shift 的绑定不要求 Shift 状态，
- * 所以 N / n 都能用；写了 shift+ 的绑定则必须按住 Shift。 */
+/* 未显式写 shift 时不要求 Shift；写了 shift+ 则必须按住。 */
 gboolean keymap_match(KeyAction action, guint keyval, GdkModifierType state);
 
-/* 显示用的按键名，如 "SPACE" / "← / →" / "F / F11"。
- * 没绑定返回 "—"；返回的字符串由 keymap 持有，不要 free。 */
+/* 显示用按键名；返回的字符串由 keymap 持有。 */
 const gchar *keymap_label(KeyAction action);
 
-#endif /* FOLLOW_KEYMAP_H */
+#endif

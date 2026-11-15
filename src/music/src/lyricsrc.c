@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <string.h>
@@ -18,10 +19,6 @@
 
 #define NETEASE_REFERER "Referer: https://music.163.com/\r\n"
 #define QQ_REFERER      "Referer: https://y.qq.com/\r\n"
-
-/* 与 bilibili.c 同理：网易云 / QQ 音乐的搜索接口同样是网页端私有接口，
- * 只用来取回用户本来就能看到的歌词文本，不触碰音频流；仅供个人学习使用。 */
-
 
 static const char *obj_str(JsonObject *obj, const char *member)
 {
@@ -93,7 +90,7 @@ static gchar *http_get_utf8(const gchar *url, const gchar *headers, gchar **erro
     return body;
 }
 
-/* QQ 的歌词是 HTML 转义的（&#10; &#58; &amp; ...） */
+/* QQ 歌词为 HTML 转义。 */
 static gchar *html_unescape(const gchar *text)
 {
     GString *out = g_string_sized_new(strlen(text) + 64);
@@ -132,7 +129,6 @@ static gchar *html_unescape(const gchar *text)
     return g_string_free(out, FALSE);
 }
 
-/* 网易云的逐字歌词（yrc）：[行起始,行时长](词起始,词时长,0)字... */
 static gboolean looks_like_yrc(const gchar *text)
 {
     const gchar *p = text;
@@ -155,7 +151,6 @@ static gboolean looks_like_yrc(const gchar *text)
     return FALSE;
 }
 
-/* 判断一份 LRC 存不存在时间轴 */
 static gboolean lrc_has_timing(const gchar *lrc)
 {
     gint count = 0;
@@ -171,8 +166,6 @@ static gboolean lrc_has_timing(const gchar *lrc)
 
     return FALSE;
 }
-
-/* 网易云 */
 
 static gchar *netease_search(const gchar *query, gchar **matched, gchar **error)
 {
@@ -264,7 +257,6 @@ static gchar *netease_lyric(const gchar *id, gchar **error)
         return NULL;
     }
 
-    /* 优先用逐字歌词（yrc）：有它才能做逐字高亮，没有就退回整行 LRC */
     {
         JsonObject *yrc = json_object_has_member(root, "yrc")
                           ? json_object_get_object_member(root, "yrc") : NULL;
@@ -279,7 +271,6 @@ static gchar *netease_lyric(const gchar *id, gchar **error)
     text = obj_str(lrc, "lyric");
 
     if (out != NULL) {
-        /* 拿到逐字歌词了 */
     } else if (text == NULL || !lrc_has_timing(text)) {
         if (error != NULL) *error = g_strdup("网易云：这首歌没有带时间轴的歌词");
     } else {
@@ -289,8 +280,6 @@ static gchar *netease_lyric(const gchar *id, gchar **error)
     json_object_unref(root);
     return out;
 }
-
-/* QQ 音乐 */
 
 static gchar *qq_search(const gchar *query, gchar **matched, gchar **error)
 {
@@ -403,8 +392,6 @@ static gchar *qq_lyric(const gchar *mid, gchar **error)
     return out;
 }
 
-/* 对外接口 */
-
 gboolean lyricsrc_parse(const gchar *spec, gchar **provider, gchar **rest)
 {
     const gchar *colon;
@@ -447,7 +434,7 @@ gchar *lyricsrc_fetch(const LyricsQuery *query, gchar **error)
         return NULL;
     }
 
-    /* 关键词：spec 里写了就用它，否则用 "歌手 歌名" */
+    /* 关键词：spec 或 "歌手 歌名"。 */
     if (query->spec != NULL && query->spec[0] != '\0')
         search = g_strdup(query->spec);
     else if (query->artist != NULL && query->title != NULL)
@@ -461,7 +448,7 @@ gchar *lyricsrc_fetch(const LyricsQuery *query, gchar **error)
 
     if (g_ascii_strcasecmp(query->provider, "qq") == 0 ||
         g_ascii_strcasecmp(query->provider, "qqmusic") == 0) {
-        /* QQ 的 songmid 是 14 位字母数字，全数字/带空格的一律当关键词 */
+        /* QQ songmid 为 14 位字母数字。 */
         gboolean looks_like_mid = query->spec != NULL &&
                                   query->spec[0] != 0 &&
                                   strchr(query->spec, ' ') == NULL &&
@@ -476,7 +463,7 @@ gchar *lyricsrc_fetch(const LyricsQuery *query, gchar **error)
         if (id != NULL)
             result = qq_lyric(id, error);
     } else {
-        /* 网易云：纯数字就是歌曲 id，否则按关键词搜索 */
+        /* 纯数字视为歌曲 id。 */
         gboolean looks_like_id = query->spec != NULL &&
                                  query->spec[0] != 0 &&
                                  strspn(query->spec, "0123456789") == strlen(query->spec);

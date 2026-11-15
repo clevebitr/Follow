@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <math.h>
@@ -16,50 +17,35 @@
 
 #include "platform.h"
 
-/* 图形来自 Simple Icons（https://simpleicons.org，CC0-1.0 公共领域）：
- * 纯 SVG path，运行时用 librsvg 渲染成 surface，再用 alpha 当遮罩涂成白色。
- * 想换图标/加平台，只要往 src/icons/ 里丢一个同名 SVG。
- *
- * src/icons/wordmark-<slug>.svg 是各家的官方字标（取自 Wikimedia Commons 上的
- * 官方 logo 文件）。胶囊里优先贴字标，品牌名不再自己用字体排 —— 没有字标的平台
- * （网易云音乐、自定义链接）才退回"品牌色图标 + 文字"。这些字标是各自所有者的
- * 商标，这里只用于标识曲目来源。 */
+/* 图标来自 Simple Icons（CC0）；运行时由 librsvg 渲染为白色遮罩。 */
 
 static const struct {
     const char *id;
     const char *name;
-    const char *slug;          /* src/icons/<slug>.svg */
+    const char *slug;
     double      r, g, b;
     const char *hosts[5];
 } g_platforms[] = {
-    /* PLATFORM_UNKNOWN */
     { "link", "LINK", NULL, 0.35, 0.35, 0.38, { NULL } },
 
-    /* PLATFORM_BILIBILI */
     { "bilibili", "BILIBILI", "bilibili", 0.984, 0.447, 0.600,
       { "bilibili.com", "b23.tv", "bili2233.cn", "bilibili.tv", NULL } },
 
-    /* PLATFORM_APPLE_MUSIC */
     { "applemusic", "APPLE MUSIC", "applemusic", 0.980, 0.176, 0.282,
       { "music.apple.com", "itunes.apple.com", "apple.co", NULL, NULL } },
 
-    /* PLATFORM_YOUTUBE */
     { "youtube", "YOUTUBE", "youtube", 1.000, 0.000, 0.000,
       { "youtube.com", "youtu.be", "music.youtube.com", NULL, NULL } },
 
-    /* PLATFORM_SPOTIFY */
     { "spotify", "SPOTIFY", "spotify", 0.114, 0.725, 0.329,
       { "spotify.com", "spoti.fi", "open.spotify.com", NULL, NULL } },
 
-    /* PLATFORM_SOUNDCLOUD */
     { "soundcloud", "SOUNDCLOUD", "soundcloud", 1.000, 0.333, 0.000,
       { "soundcloud.com", "snd.sc", NULL, NULL, NULL } },
 
-    /* PLATFORM_NETEASE */
     { "netease", "NETEASE", "neteasecloudmusic", 0.760, 0.047, 0.047,
       { "music.163.com", "163cn.tv", "y.music.163.com", NULL, NULL } },
 
-    /* PLATFORM_BANDCAMP */
     { "bandcamp", "BANDCAMP", "bandcamp", 0.114, 0.627, 0.765,
       { "bandcamp.com", NULL, NULL, NULL, NULL } },
 };
@@ -91,7 +77,6 @@ Platform platform_from_name(const char *name)
             return (Platform)p;
     }
 
-    /* 常见别名 */
     if (g_ascii_strcasecmp(name, "b站") == 0 ||
         g_ascii_strcasecmp(name, "bili") == 0)
         return PLATFORM_BILIBILI;
@@ -126,8 +111,6 @@ void platform_brand_color(Platform p, double *r, double *g, double *b)
     *b = g_platforms[p].b;
 }
 
-/* ---------- 图标渲染（librsvg + 缓存） ---------- */
-
 typedef struct {
     cairo_surface_t *surface;
     int              px;
@@ -135,7 +118,6 @@ typedef struct {
 
 static IconCache g_icons[PLATFORM_COUNT];
 
-/* 把 SVG 渲染成 px×px、透明底、纯白的图标 surface */
 static cairo_surface_t *icon_surface(Platform p, int px)
 {
     g_autofree gchar *path = NULL;
@@ -185,7 +167,7 @@ static cairo_surface_t *icon_surface(Platform p, int px)
 
     cr = cairo_create(surface);
 
-    /* SVG 默认是黑字透明底；我们只用它的 alpha 当遮罩 */
+    /* 使用 SVG alpha 作为白色遮罩。 */
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
     viewport.x = 0.0;
     viewport.y = 0.0;
@@ -209,15 +191,13 @@ static cairo_surface_t *icon_surface(Platform p, int px)
     return surface;
 }
 
-/* ---------- 官方字标（wordmark） ---------- */
-
 typedef struct {
-    cairo_surface_t *surface;   /* 白色 alpha 遮罩，按 WRD_PX 高度渲染 */
-    double           aspect;    /* 宽 / 高 */
-    gboolean         tried;     /* 已经尝试过加载（失败也记住，不要每次重试） */
+    cairo_surface_t *surface;   /* 官方字标：白色 alpha 遮罩。 */
+    double           aspect;
+    gboolean         tried;
 } WordCache;
 
-#define WRD_PX 128          /* 字标缓存的高度（像素），画的时候等比缩 */
+#define WRD_PX 128
 
 static WordCache g_words[PLATFORM_COUNT];
 
@@ -228,7 +208,7 @@ static gchar *wordmark_path(Platform p)
     return g_build_filename("src", "icons", name, NULL);
 }
 
-/* 从 SVG 里读宽高比：先看 width/height，其次看 viewBox（很多官方 SVG 只给 viewBox） */
+/* 从 width/height 或 viewBox 读取宽高比。 */
 static double wordmark_aspect(RsvgHandle *handle)
 {
     gboolean      has_w = FALSE, has_h = FALSE, has_vb = FALSE;
@@ -242,7 +222,6 @@ static double wordmark_aspect(RsvgHandle *handle)
 
     rsvg_handle_get_intrinsic_dimensions(handle, &has_w, &w, &has_h, &h, &has_vb, &vb);
 
-    /* 很多官方 SVG 只给 viewBox（width/height 是 100%），那种按 viewBox 算 */
     if (has_vb && vb.width > 0 && vb.height > 0)
         aspect = vb.width / vb.height;
     else if (has_w && has_h && w.length > 0 && h.length > 0)
@@ -251,7 +230,6 @@ static double wordmark_aspect(RsvgHandle *handle)
     return aspect > 0.0 ? aspect : 0.0;
 }
 
-/* 加载并渲染成白色遮罩（只渲染一次，之后按需缩放） */
 static WordCache *wordmark_cache(Platform p)
 {
     WordCache         *cache;
@@ -280,7 +258,7 @@ static WordCache *wordmark_cache(Platform p)
     path = wordmark_path(p);
 
     if (!g_file_test(path, G_FILE_TEST_EXISTS))
-        return NULL;                       /* 没有字标：调用方退回图标 + 文字 */
+        return NULL;
 
     handle = rsvg_handle_new_from_file(path, &error);
     if (handle == NULL) {
@@ -340,7 +318,7 @@ gboolean platform_wordmark_size(Platform p, double max_h, double max_w,
     h = max_h;
     w = h * cache->aspect;
 
-    if (w > max_w) {                 /* 太宽就整体缩小，保持比例 */
+    if (w > max_w) {
         w = max_w;
         h = w / cache->aspect;
     }
@@ -396,17 +374,15 @@ void platform_draw_icon(cairo_t *cr, Platform p, double x, double y, double size
 
     platform_brand_color(p, &r, &g, &b);
 
-    /* 品牌色底板 */
     cairo_set_source_rgb(cr, r, g, b);
     icon_rounded_rect(cr, x, y, size, size, size * 0.24);
     cairo_fill(cr);
 
-    /* 白色图标：用 SVG 的 alpha 作遮罩，任意尺寸都清晰 */
     inset = size * 0.20;
-    icon  = icon_surface(p, (int)lround((size - inset * 2.0) * 2.0));   /* 2x 超采样 */
+    icon  = icon_surface(p, (int)lround((size - inset * 2.0) * 2.0));
 
     if (icon == NULL)
-        return;      /* 没图标就只留底板，不要退回手绘 */
+        return;
 
     cairo_save(cr);
     cairo_translate(cr, x + inset, y + inset);

@@ -1,7 +1,5 @@
-//! Follow 的 uidbg 调试通道客户端。
-//!
-//! 应用侧（`src/ui/uidbg.c`）在 `FOLLOW_UIDBG=1` 时监听 127.0.0.1:7878，
-//! 一行一个 JSON 请求 / 一行一个 JSON 响应；这里只做「发一条命令、拿回 data」。
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Follow uidbg 调试通道客户端：发送命令并返回响应 data。
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -56,7 +54,7 @@ impl Client {
         Ok(stream)
     }
 
-    /// 发一条命令；返回响应里的 `data` 对象。
+    /// 发送命令并返回 data 对象。
     pub fn call(&self, cmd: &str, args: Value) -> Result<Value, String> {
         let mut stream = self.connect()?;
         let request = json!({ "id": 1, "cmd": cmd, "args": args });
@@ -94,7 +92,7 @@ impl Client {
         Ok(parsed.get("data").cloned().unwrap_or(Value::Null))
     }
 
-    /// 通道在不在（不报错）
+    /// 检测通道是否可用。
     pub fn alive(&self) -> bool {
         self.call("ping", json!({})).is_ok()
     }

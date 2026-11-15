@@ -1,6 +1,7 @@
-//! 把 uidbg 的 JSON 压成「一行一条、人/模型都能读懂」的文本。
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! 将 uidbg JSON 格式化为紧凑文本。
 
-/// 压成单行、去掉多余空白、超长截断。
+/// 压缩为单行并截断超长内容。
 pub fn one_line(text: &str, max: usize) -> String {
     let mut s = String::with_capacity(text.len());
 
@@ -22,7 +23,7 @@ pub fn one_line(text: &str, max: usize) -> String {
     s
 }
 
-/// 保留 digits 位小数，去掉尾随 0（数字看起来更干净）。
+/// 保留指定小数位并去除尾随 0。
 pub fn num(v: f64, digits: usize) -> String {
     if !v.is_finite() {
         return "?".to_string();
@@ -42,7 +43,7 @@ pub fn num(v: f64, digits: usize) -> String {
     }
 }
 
-/// 秒 → "mm:ss"
+/// 秒 → mm:ss
 pub fn clock(seconds: f64) -> String {
     let total = if seconds.is_finite() && seconds > 0.0 {
         seconds.round() as i64

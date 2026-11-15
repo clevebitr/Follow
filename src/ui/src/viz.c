@@ -4,22 +4,13 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
-/*
- * 音频粒子背景。
- *
- *   scope   ——  media.c 的音频回调把输出下混成单声道写进一个小环
- *   analyze ——  每帧取最近 1024 个样本，Hann 窗 + 自带的 radix-2 FFT，
- *               分成 24 个对数频段，再做快起慢落的包络
- *   draw    ——  粒子画在动态背景的小纹理里（scrim 之前），所以不会压住文字
- *
- * 三种预设都是为了“背景”而不是“主角”设计的：低透明度、慢速、颜色取自封面。
- * 不依赖 libvisual / OpenGL，也不引入 FFTW。
- */
+/* 音频粒子背景：scope → FFT 频段 → 粒子。 */
 
 #include "viz.h"
 
@@ -86,8 +77,6 @@ static int   g_band_hi[VIZ_BANDS];
 static int   g_band_rate = 0;
 static gboolean g_analyzer_ready = FALSE;
 
-/* ---------------- 小工具 ---------------- */
-
 static double frand(void)
 {
     g.rng ^= g.rng << 13;
@@ -101,8 +90,6 @@ static double clamp01(double v)
 {
     return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
 }
-
-/* ---------------- FFT / 频段 ---------------- */
 
 static void fft(float *re, float *im, int n)
 {
@@ -161,7 +148,7 @@ static void analyzer_init(int rate)
         g_window[i] = (float)(0.5 - 0.5 * cos(2.0 * VIZ_PI * (double)i
                                              / (double)(VIZ_FFT_N - 1)));
 
-    /* 40 Hz → 12 kHz，对数分频。低频段窄一点，镲片/齿音也能看见。 */
+    /* 对数分频：40 Hz..12 kHz。 */
     for (int b = 0; b < VIZ_BANDS; b++) {
         double f0 = 40.0 * pow(12000.0 / 40.0, (double)b / (double)VIZ_BANDS);
         double f1 = 40.0 * pow(12000.0 / 40.0, (double)(b + 1) / (double)VIZ_BANDS);
@@ -221,7 +208,6 @@ static void analyzer_run(gboolean playing, double dt)
             if (n > 0)
                 sum /= (double)n;
 
-            /* 归一化后大约落在 0.001..0.5；log 之后小信号也能看见 */
             target[b] = (float)clamp01(log10(1.0 + sum * 8.0) * 2.25 * g.gain);
         }
     }
@@ -263,8 +249,6 @@ static void analyzer_run(gboolean playing, double dt)
     g.beat  *= (float)exp(-dt * 5.0);
     g.flash *= (float)exp(-dt * 3.2);
 }
-
-/* ---------------- 粒子 ---------------- */
 
 static void trail_reset(VizParticle *p)
 {
@@ -346,7 +330,7 @@ static void particle_step(VizParticle *p, double dt)
         if (p->x < -out_margin) p->x = 1.0f + out_margin;
         if (p->x > 1.0f + out_margin) p->x = -out_margin;
 
-        /* 飘出顶部就回收，否则粒子会越飘越少 */
+        /* 飘出顶部回收粒子。 */
         if (p->y < -out_margin)
             p->life = 0.0f;
         break;
@@ -377,7 +361,7 @@ static void particle_step(VizParticle *p, double dt)
             if (p->y < -0.05f) { p->y = 1.05f; wrapped = TRUE; }
             if (p->y > 1.05f)  { p->y = -0.05f; wrapped = TRUE; }
 
-            /* 粒子从一边绕到另一边时，旧轨迹要清掉，否则会拉出一条横贯屏幕的直线 */
+            /* 环绕时清除旧轨迹。 */
             if (wrapped)
                 trail_reset(p);
         }
@@ -394,8 +378,6 @@ static void particle_step(VizParticle *p, double dt)
     if (p->life <= 0.0f)
         particle_spawn(p, FALSE);
 }
-
-/* ---------------- 配置 / 生命周期 ---------------- */
 
 static VizEffect effect_from_name(const gchar *name)
 {
@@ -498,8 +480,6 @@ void viz_tick(void)
         particle_step(&g.particles[i], dt);
 }
 
-/* ---------------- 绘制 ---------------- */
-
 static void particle_color(const Palette *pal, float tint, double *r, double *g_, double *b)
 {
     if (pal != NULL && pal->has) {
@@ -524,7 +504,6 @@ static void particle_color(const Palette *pal, float tint, double *r, double *g_
         *b = 0.96;
     }
 
-    /* 往白色提一点，保证是“发光”而不是“脏色” */
     *r = *r * 0.72 + 0.28;
     *g_ = *g_ * 0.72 + 0.30;
     *b = *b * 0.72 + 0.34;
@@ -545,8 +524,7 @@ static void draw_dot(cairo_t *cr, double x, double y, double radius, double alph
     if (alpha <= 0.001 || radius <= 0.0)
         return;
 
-    /* 用平滑的径向渐变而不是硬边圆：小纹理放大到全屏时，
-     * 硬边圆会被高质量缩放滤镜拉出“甜甜圈”振铃。 */
+    /* 径向渐变避免硬边缩放振铃。 */
     cairo_pattern_t *pat = cairo_pattern_create_radial(x, y, 0.0, x, y, radius * 2.6);
 
     cairo_pattern_add_color_stop_rgba(pat, 0.00, r, g_, b, alpha);
@@ -682,8 +660,6 @@ void viz_draw(cairo_t *cr, double w, double h, const Palette *pal)
     cairo_restore(cr);
 }
 
-/* ---------------- GPU sprite 顶点 ---------------- */
-
 static void emit_sprite(VizGlVertex *out, int *n, int max,
                         double cx, double cy, double radius,
                         double r, double g_, double b, double a)
@@ -696,7 +672,6 @@ static void emit_sprite(VizGlVertex *out, int *n, int max,
     if (*n + 6 > max)
         return;
 
-    /* 和 draw_dot 一致：可见核心是 radius，径向渐变铺到 2.6 倍。 */
     half = radius * 2.6;
 
     {
@@ -769,7 +744,7 @@ int viz_gl_vertices(VizGlVertex *out, int max, double w, double h,
 
             a = (double)p->alpha * fade * (0.40 + 0.75 * (double)g.bass);
 
-            /* 用两点 + 中点拼一条发光短拖尾，避免 GPU 路径再开一个线段 shader。 */
+            /* 用两点短拖尾代替线段 shader。 */
             emit_sprite(out, &n, max, px, py, MAX(0.35, size * 0.55),
                         r, gg, b, a * 0.55);
             emit_sprite(out, &n, max, (px + x) * 0.5, (py + y) * 0.5,

@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #define MINIAUDIO_IMPLEMENTATION
@@ -30,14 +31,11 @@
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-/* 一次解码最多产出多少帧：aac 1024、mp3 1152、opus 960，留大一点 */
 #define MEDIA_DECODE_CHUNK 8192
-
-/* ffmpeg 上下文 */
 
 typedef struct {
     AVFormatContext *fmt;
-    AVIOContext     *pb;           /* 自己接的网络流（ranged 模式），可为 NULL */
+    AVIOContext     *pb;
     AVCodecContext  *dec;
     SwrContext      *swr;
     AVPacket        *pkt;
@@ -48,8 +46,8 @@ typedef struct {
     int              eof;
     ma_uint64        length_frames;
 
-    float           *scratch;      /* 重采样中转 */
-    int              scratch_cap;  /* 帧数 */
+    float           *scratch;
+    int              scratch_cap;
 } FFMedia;
 
 static char *dup_headers_or_null(const char *headers)
@@ -57,13 +55,12 @@ static char *dup_headers_or_null(const char *headers)
     return (headers != NULL && *headers != '\0') ? g_strdup(headers) : NULL;
 }
 
-/* 环形缓冲 */
 static ma_uint64 ring_free_frames(Media *m)
 {
     ma_uint64 w = __atomic_load_n(&m->ring_write, __ATOMIC_ACQUIRE);
     ma_uint64 r = __atomic_load_n(&m->ring_read, __ATOMIC_ACQUIRE);
 
-    if (w < r)                       /* seek 时可能短暂倒挂 */
+    if (w < r)                       /* seek 时可能短暂倒挂。 */
         return 0;
 
     return (ma_uint64)m->ring_frames - (w - r);
@@ -75,14 +72,13 @@ static void ring_reset(Media *m)
     __atomic_store_n(&m->ring_read, 0, __ATOMIC_RELEASE);
 }
 
-/* 只有解码线程调用 */
 static void ring_push(Media *m, const float *src, ma_uint32 frames)
 {
     ma_uint64 w = m->ring_write;
     ma_uint64 free_frames = ring_free_frames(m);
     ma_uint32 done = 0;
 
-    if ((ma_uint64)frames > free_frames)      /* 兜底：宁可丢一点也别越界 */
+    if ((ma_uint64)frames > free_frames)
         frames = (ma_uint32)free_frames;
 
     while (done < frames) {
@@ -100,8 +96,7 @@ static void ring_push(Media *m, const float *src, ma_uint32 frames)
     __atomic_store_n(&m->ring_write, w, __ATOMIC_RELEASE);
 }
 
-/* 可视化取样：把刚输出的立体声下混成单声道，写进 scope 环。
- * 这里只做加法和取模，成本约等于一次 memcpy 的三分之一。 */
+/* 可视化：立体声下混为单声道写入 scope 环。 */
 static void scope_push(Media *m, const float *src, ma_uint32 frames)
 {
     ma_uint64 w;
@@ -119,7 +114,6 @@ static void scope_push(Media *m, const float *src, ma_uint32 frames)
     __atomic_store_n(&m->scope_write, w + frames, __ATOMIC_RELEASE);
 }
 
-/*  音频回调 */
 static void media_data_callback(ma_device *device, void *output, const void *input,
                                 ma_uint32 frame_count)
 {
@@ -161,18 +155,16 @@ static void media_data_callback(ma_device *device, void *output, const void *inp
     __atomic_store_n(&m->ring_read, r + take, __ATOMIC_RELEASE);
     __atomic_fetch_add(&m->cursor, take, __ATOMIC_RELEASE);
 
-    /* 可视化要的是“刚刚听到的声音”，所以推的是已经写进输出缓冲的样本 */
+    /* 写入输出缓冲后再记录取样。 */
     scope_push(m, out, frame_count);
 
-    /* 缓冲抽干了而且解码线程已经到了文件尾 → 这首放完了 */
+    /* 缓冲空且已到文件尾 → 播放结束。 */
     if (take == 0 && __atomic_load_n(&m->eof, __ATOMIC_ACQUIRE) &&
         __atomic_load_n(&m->has_stream, __ATOMIC_ACQUIRE)) {
         __atomic_store_n(&m->finished, 1, __ATOMIC_RELEASE);
         __atomic_store_n(&m->state, MEDIA_STOPPED, __ATOMIC_RELEASE);
     }
 }
-
-/* ffmpeg */
 
 static void ff_close(FFMedia *ff)
 {
@@ -209,7 +201,7 @@ static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers,
     int            result;
 
     av_dict_set(&opts, "user_agent", FOLLOW_UA, 0);
-    av_dict_set(&opts, "rw_timeout", "15000000", 0);      /* 15s 读写超时 */
+    av_dict_set(&opts, "rw_timeout", "15000000", 0);
     av_dict_set(&opts, "reconnect", "1", 0);
     av_dict_set(&opts, "reconnect_streamed", "1", 0);
 
@@ -217,8 +209,7 @@ static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers,
         av_dict_set(&opts, "headers", headers, 0);
 
     if (ranged) {
-        /* 自己接一个分块读的 AVIO：FFmpeg 原来的 http 会发 Range: bytes=0-，
-         * googlevideo 直接 403。 */
+        /* 自定义 AVIO：googlevideo 拒绝开放式 Range。 */
         g_autofree gchar *why = NULL;
 
         ff->pb = httpstream_avio_open(url, headers, &why);
@@ -240,7 +231,6 @@ static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers,
         ff->fmt->pb    = ff->pb;
         ff->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
 
-        /* 已经在流里了，opts 对自定义 IO 没用，免得它去查 http 选项 */
         av_dict_free(&opts);
 
         result = avformat_open_input(&ff->fmt, NULL, NULL, NULL);
@@ -296,7 +286,6 @@ static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers,
     ff->out_rate     = (int)m->sample_rate;
     ff->out_channels = MEDIA_CHANNELS;
 
-    /* 时长（直播流可能没有） */
     {
         AVStream *st = ff->fmt->streams[ff->stream];
         gint64    us = 0;
@@ -317,7 +306,6 @@ static int ff_open(FFMedia *ff, Media *m, const char *url, const char *headers,
     return 0;
 }
 
-/* 保证 swr 跟当前帧匹配 */
 static int ff_prepare_swr(FFMedia *ff, const AVFrame *frame)
 {
     AVChannelLayout in_layout;
@@ -363,7 +351,6 @@ static void ff_ensure_scratch(FFMedia *ff, int frames)
     ff->scratch = g_renew(float, ff->scratch, (gsize)frames * MEDIA_CHANNELS);
 }
 
-/* 把当前 frame 重采样成 f32 立体声并推进环形缓冲 */
 static int ff_convert(FFMedia *ff, Media *m)
 {
     int out_max;
@@ -390,14 +377,13 @@ static int ff_convert(FFMedia *ff, Media *m)
     return 0;
 }
 
-/* 解一包，把 PCM 推进环形缓冲。返回 >0 = 这一轮有产出；-1 = 文件结束 */
 static int ff_decode_some(FFMedia *ff, Media *m)
 {
     for (;;) {
         int read_result = av_read_frame(ff->fmt, ff->pkt);
 
         if (read_result == AVERROR_EOF) {
-            /* 冲刷解码器：送 NULL 进去，把残留帧取完 */
+            /* 冲刷解码器。 */
             avcodec_send_packet(ff->dec, NULL);
 
             for (;;) {
@@ -442,17 +428,15 @@ static int ff_decode_some(FFMedia *ff, Media *m)
             av_frame_unref(ff->frame);
         }
 
-        return 1;   /* 让外层回去检查暂停 / seek / 退出 */
+        return 1;
     }
 }
 
-/* 返回 FALSE 表示这个流不支持随机访问（有些 CDN 不接受 Range 请求），
- * 调用方必须保持原来的播放位置，否则会被误当成播放结束。 */
+/* 不支持随机访问时返回 FALSE。 */
 static gboolean ff_seek(FFMedia *ff, ma_uint64 frame, Media *m)
 {
     gint64 us = (gint64)((double)frame * 1000000.0 / (double)m->sample_rate);
-    /* stream_index = -1 时，时间戳单位是 AV_TIME_BASE（微秒）；
-     * 传具体流索引的话得先换算到该流的 time_base —— 之前混用导致 seek 直接跳到文件末尾。 */
+    /* 时间戳单位为 AV_TIME_BASE；混用会 seek 到文件末尾。 */
     int    result = avformat_seek_file(ff->fmt, -1, INT64_MIN, us, INT64_MAX,
                                        AVSEEK_FLAG_BACKWARD);
 
@@ -477,8 +461,6 @@ static gboolean ff_seek(FFMedia *ff, ma_uint64 frame, Media *m)
     return TRUE;
 }
 
-/* 解码线程 */
-
 static gpointer media_decode_thread(gpointer data)
 {
     Media   *m = (Media *)data;
@@ -492,7 +474,6 @@ static gpointer media_decode_thread(gpointer data)
         if (__atomic_load_n(&m->thread_stop, __ATOMIC_ACQUIRE))
             break;
 
-        /* 1) 打开新地址 */
         if (__atomic_exchange_n(&m->cmd_load, 0, __ATOMIC_ACQ_REL)) {
             gchar    *url = NULL;
             gchar    *headers = NULL;
@@ -535,7 +516,6 @@ static gpointer media_decode_thread(gpointer data)
             continue;
         }
 
-        /* 2) seek */
         seek = __atomic_exchange_n(&m->cmd_seek, (ma_int64)-1, __ATOMIC_ACQ_REL);
         if (seek >= 0 && ff->fmt != NULL) {
             if (ff_seek(ff, (ma_uint64)seek, m)) {
@@ -544,8 +524,6 @@ static gpointer media_decode_thread(gpointer data)
                 __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
                 __atomic_store_n(&m->cursor, (ma_uint64)seek, __ATOMIC_RELEASE);
             } else {
-                /* seek 失败：位置和缓冲都保持不动，继续播放；
-                 * 同时把 UI 那边的光标拉回真实播放位置，避免进度条乱跳 */
                 __atomic_store_n(&m->cmd_seek, (ma_int64)-1, __ATOMIC_RELEASE);
             }
         }
@@ -560,7 +538,6 @@ static gpointer media_decode_thread(gpointer data)
             continue;
         }
 
-        /* 缓冲快满就先暂停，别把网络读得太凶 */
         if (ring_free_frames(m) < MEDIA_DECODE_CHUNK) {
             g_usleep(3000);
             continue;
@@ -575,7 +552,6 @@ static gpointer media_decode_thread(gpointer data)
     return NULL;
 }
 
-/* 对外接口 */
 int media_init(Media *m)
 {
     ma_device_config config;
@@ -601,7 +577,7 @@ int media_init(Media *m)
     config                     = ma_device_config_init(ma_device_type_playback);
     config.playback.format     = ma_format_f32;
     config.playback.channels   = MEDIA_CHANNELS;
-    config.sampleRate          = 0;    /* 0 = 用设备原生采样率 */
+    config.sampleRate          = 0;
     config.dataCallback        = media_data_callback;
     config.pUserData           = m;
 
@@ -673,7 +649,7 @@ int media_play(Media *m, const char *url, const char *headers, gboolean ranged)
     g_mutex_unlock(&m->cmd_lock);
 
     __atomic_store_n(&m->state, MEDIA_LOADING, __ATOMIC_RELEASE);
-    m->error[0] = '\0';        /* 新的一次加载：先清掉上一首留下的错误 */
+    m->error[0] = '\0';
     __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&m->cursor, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&m->cmd_load, 1, __ATOMIC_RELEASE);
@@ -701,7 +677,6 @@ int media_continue(Media *m)
 
     state = __atomic_load_n(&m->state, __ATOMIC_ACQUIRE);
     if (state == MEDIA_STOPPED) {
-        /* 停止状态下继续：从头开始 */
         __atomic_store_n(&m->cmd_seek, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&m->finished, 0, __ATOMIC_RELEASE);
     }
@@ -855,8 +830,6 @@ void media_clear(Media *m)
 
     avformat_network_deinit();
 }
-
-/* 音量 / 输出设备 */
 
 void media_set_volume(Media *m, double volume)
 {
@@ -1014,7 +987,7 @@ int media_set_output_device(Media *m, const char *name)
     result = media_try_open(m, want, &config);
     label  = use_default ? "Default" : name;
 
-    /* 指定的设备打不开：先退回系统默认，再退回原来的设备。 */
+    /* 设备打开失败时回退到系统默认。 */
     if (result != MA_SUCCESS && want != NULL) {
         g_warning("media: cannot open output '%s': %s",
                   name, ma_result_description(result));

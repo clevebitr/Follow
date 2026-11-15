@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "backdrop.h"
@@ -26,10 +27,9 @@
 #include "ui.h"
 #include "viz.h"
 
-#define BG_WIDTH      512      /* 小纹理的宽度，放大交给 GPU */
-#define BG_BLUR_DIM   160      /* 先把封面缩到这个长边再模糊 */
-/* 背景泵的间隔来自 [ui] backdrop_fps（main.c），这里只把实际间隔换算成相位步进。
- * 默认 30fps；相位按真实 dt 推进，所以 30 / 60fps 动画速度一致。 */
+#define BG_WIDTH      512
+#define BG_BLUR_DIM   160
+/* 相位按实际 dt 推进，与帧率无关。 */
 
 static BackdropFrame g_prepared;
 static gint64        g_base_gen;
@@ -75,7 +75,6 @@ static cairo_surface_t *blur_surface(cairo_surface_t *src, int max_dim)
     return cur;
 }
 
-/* 小纹理的尺寸 */
 static void bg_small_size(int width, int height, int *out_w, int *out_h)
 {
     int h;
@@ -92,7 +91,6 @@ static void bg_small_size(int width, int height, int *out_w, int *out_h)
     *out_h = CLAMP(h, 96, 640);
 }
 
-/* 模糊封面缩略图：只在换封面 / 宽高比变化时重建 */
 static void build_base(int width, int height)
 {
     int      sw, sh;
@@ -150,7 +148,7 @@ static void build_base(int width, int height)
     cairo_destroy(cr);
 }
 
-/* cairo 的 ARGB32（小端 = BGRA，预乘）正好等于 GDK_MEMORY_B8G8R8A8_PREMULTIPLIED */
+/* ARGB32 小端 = BGRA 预乘，匹配 GDK 内存格式。 */
 static GdkTexture *texture_from_surface(cairo_surface_t *surface)
 {
     int         w, h, stride;
@@ -179,7 +177,6 @@ static GdkTexture *texture_from_surface(cairo_surface_t *surface)
     return texture;
 }
 
-/* RGB → HSV 平移色相 → RGB */
 static void hue_shift(double *r, double *g, double *b, double degrees)
 {
     double max = MAX(*r, MAX(*g, *b));
@@ -217,7 +214,6 @@ static void hue_shift(double *r, double *g, double *b, double degrees)
     *b += m;
 }
 
-/* 三团渐变：位置 / 半径 / 透明度按不同频率缓慢漂移 */
 static void compute_blobs(const Palette *pal, double phase, int sw, int sh,
                           BackdropBlob out[3])
 {
@@ -264,7 +260,6 @@ const BackdropFrame *backdrop_prepare(int width, int height)
     bg_small_size(width, height, &sw, &sh);
     build_base(width, height);
 
-    /* 退潮进度：先算出来，种子色和底图都用同一个值 */
     if (g_has_prev && app.bg_prev != NULL) {
         p = fx_t(&app.fx_bg);
 
@@ -315,13 +310,12 @@ static void render_frame(int width, int height)
 
     cr = cairo_create(app.bg_frame);
 
-    /* 兜底近黑底 */
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_rgba(cr, 0.035, 0.035, 0.040, 1.0);
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-    /* 背景退潮：新底图先铺满，旧底图整块左移退出，它的右边缘带着一条渐隐带滑走 */
+    /* 退潮：新底图铺满，旧底图左移退出。 */
     if (f->base != NULL) {
         cairo_set_source_surface(cr, f->base, 0.0, 0.0);
         cairo_paint(cr);
@@ -359,10 +353,8 @@ static void render_frame(int width, int height)
         cairo_pattern_destroy(p);
     }
 
-    /* 音频粒子：画在 scrim 之前，所以会被压暗，不会抢文字 */
     viz_draw(cr, (double)sw, (double)sh, &f->palette);
 
-    /* 压暗，保证白字 / 二维码可读 */
     {
         cairo_pattern_t *scrim = cairo_pattern_create_linear(0.0, 0.0, 0.0, (double)sh);
 
@@ -380,7 +372,7 @@ static void render_frame(int width, int height)
 
 void backdrop_swap(void)
 {
-    /* 换封面：把当前底图和种子色留作退场用，并开始退场过渡 */
+    /* 换封面时保留旧底图用于过渡。 */
     g_clear_pointer(&app.bg_prev, cairo_surface_destroy);
     g_has_prev = FALSE;
     g_prev_gen++;
@@ -444,8 +436,7 @@ void backdrop_push(int width, int height)
     build_base(width, height);
     render_frame(width, height);
 
-    /* 小纹理放大到全屏时，高质量缩放滤镜会在亮点周围拉出振铃；
-     * 粒子层先做一次 1px 盒式模糊，把高频压掉，环就没了。 */
+    /* 粒子层先做 1px 盒式模糊，抑制缩放振铃。 */
     if (viz_active())
         surface_box_blur(app.bg_frame, 1, 1);
 
@@ -469,11 +460,11 @@ gboolean backdrop_tick(gpointer data)
     if (width <= 0 || height <= 0 || !gtk_widget_get_mapped(app.window))
         return G_SOURCE_CONTINUE;
 
-    /* 拖动或缩放窗口期间暂停动画，保证窗口响应 */
+    /* 拖动 / 缩放期间暂停动画。 */
     if (app.win_dragging)
         return G_SOURCE_CONTINUE;
 
-    /* 歌曲墙自己就是全屏画面：暂停背景粒子/模糊，把 CPU 让给磁贴动画 */
+    /* 歌曲墙打开时暂停背景动画。 */
     if (playlist_is_open() && !playlist_is_closing())
         return G_SOURCE_CONTINUE;
 
@@ -482,8 +473,7 @@ gboolean backdrop_tick(gpointer data)
     backdrop_step(1.0 / (double)MAX(config_backdrop_fps(), 1));
 
     if (backdropgl_ready()) {
-        /* GPU 背景：30fps 只更新相位 / 粒子并让 GLArea 重画，
-         * 不再生成 512px 的 CPU 小纹理。 */
+        /* GPU 背景只更新相位并重画 GLArea。 */
         if (app.bg_gl != NULL)
             gtk_widget_queue_draw(app.bg_gl);
     } else {

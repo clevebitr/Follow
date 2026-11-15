@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #ifndef FOLLOW_CONFIG_H
@@ -21,45 +22,40 @@
 #define WINDOW_TITLE  "Follow"
 #define QRCODE_LINK   "https://github.com/clevebitr"
 
-/* [net] 没配时的网络默认值。
- * UA 用浏览器串：B 站这类接口会挡非浏览器 UA。 */
+/* 默认浏览器 UA；B 站等接口会拒绝非浏览器 UA。 */
 #define HTTP_DEFAULT_USER_AGENT \
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-#define HTTP_DEFAULT_TIMEOUT         15   /* 整次请求，秒 */
-#define HTTP_DEFAULT_CONNECT_TIMEOUT 5    /* 建连，秒 */
+#define HTTP_DEFAULT_TIMEOUT         15   /* 请求总超时（秒） */
+#define HTTP_DEFAULT_CONNECT_TIMEOUT 5    /* 连接超时（秒） */
 
-/* [metadata] 没配时的 MusicBrainz UA。MB 要求 UA 里能联系到项目主页，
- * 否则会被限速或直接 403。 */
+/* MusicBrainz 要求 UA 包含项目信息，否则可能被限速。 */
 #define METADATA_DEFAULT_USER_AGENT \
     "Follow/0.1.0 ( https://github.com/clevebitr/follow )"
 
-/* 一个曲目 = 配置里的一个 [audioN] 组。
- * link / pic / lrc 既可以是本地路径，也可以是 http(s) URL；
- * *_remote 是加载时算好的标志，省得每次再解析 scheme。
- * 所有字段的内存都由 config 模块持有，调用方不要 free。 */
+/* 曲目：对应一个 [audioN] 组。link / pic / lrc 支持本地路径或 http(s) URL。
+ * 字段由 config 模块持有，调用方不得释放。 */
 
 typedef struct {
-    gchar   *id;            /* 组名，如 "audio1" */
-    gchar   *link;          /* 音频：本地路径 或 http(s) URL，必有 */
-    gchar   *title;         /* 曲名：可为 NULL（从文件名推断） */
-    gchar   *artist;        /* 艺人：可为 NULL */
-    gchar   *pic;           /* 封面：可为 NULL */
-    gchar   *lrc;           /* 歌词：本地 .lrc / netease:... / qq:...，可为 NULL */
-    gint     lrc_offset_ms; /* 歌词整体偏移（毫秒）：正数 = 歌词延后 */
-    gchar   *page;          /* 平台页面链接（二维码 + 徽标用）：可为 NULL */
-    gchar   *note;          /* 这首歌的备注（覆盖 [note] text），可为 NULL */
-    gchar   *platform;      /* 平台短名，可为 NULL（缺省按 page 的域名自动识别） */
+    gchar   *id;
+    gchar   *link;
+    gchar   *title;
+    gchar   *artist;
+    gchar   *pic;
+    gchar   *lrc;           /* .lrc 路径 / netease:... / qq:... */
+    gint     lrc_offset_ms; /* 正数表示歌词延后（毫秒） */
+    gchar   *page;          /* 平台页面链接（二维码 / 徽标用） */
+    gchar   *note;
+    gchar   *platform;
     gboolean link_remote;
     gboolean pic_remote;
     gboolean lrc_remote;
 } AudioTrack;
 
-/* 循环模式 */
 typedef enum {
-    REPEAT_OFF = 0,     /* 放到列表末尾就停 */
-    REPEAT_ALL,         /* 列表循环 */
-    REPEAT_ONE          /* 单曲循环 */
+    REPEAT_OFF = 0,
+    REPEAT_ALL,
+    REPEAT_ONE
 } RepeatMode;
 
 typedef struct {
@@ -68,122 +64,106 @@ typedef struct {
     gboolean fullscreen;
     gchar   *title;
     gchar   *qrcode_link;
-    gchar   *qrcode_label;   /* 自定义链接胶囊上的文字，可为 NULL */
-    gchar   *note;           /* [note] text= 全局备注：可为 NULL */
+    gchar   *qrcode_label;
+    gchar   *note;
 
-    /* [playback] 播放偏好 */
-    gint     repeat;        /* RepeatMode */
+    gint     repeat;
     gboolean shuffle;
 
-    /* [cache] 歌词 / 封面 / B 站元数据 / 收听统计的落地目录；
-     * NULL = <用户缓存目录>/follow */
+    /* 缓存目录；NULL = <用户缓存目录>/follow */
     gchar   *cache_dir;
 
-    /* [cache] 解析结果 / 可选音频 / 封面缓存策略 */
-    gint     resolve_ttl;      /* 秒；0 = 不缓存解析结果 */
-    gboolean audio_cache;      /* 是否把完整音频落到 <cache>/follow/audio */
-    gint     audio_max_mb;     /* 音频缓存上限（MB） */
-    gint     cover_max_mb;     /* 封面缓存上限（MB） */
+    gint     resolve_ttl;      /* 解析缓存 TTL（秒，0 = 不缓存） */
+    gboolean audio_cache;
+    gint     audio_max_mb;     /* 上限（MB） */
+    gint     cover_max_mb;     /* 上限（MB） */
 
-    /* [visualizer] 背景粒子效果：effect = off / dust / warp / flow */
+    /* 粒子效果：off / dust / warp / flow */
     gchar   *viz_effect;
-    gint     viz_particles;   /* 粒子数量，0 = 用默认值 */
-    double   viz_gain;        /* 音频灵敏度，1.0 为基准 */
+    gint     viz_particles;   /* 0 = 默认 */
+    double   viz_gain;        /* 1.0 为基准 */
 
-    /* [ui] 动效总开关 / 动态背景刷新率 */
     gboolean animations;
-    gint     backdrop_fps;    /* 10..240，默认 30 */
+    gint     backdrop_fps;    /* 10..240 */
 
-    /* [keys] 按键绑定：每个动作的原始字符串，NULL = 用 keymap 内置默认值 */
+    /* 原始绑定；NULL = 内置默认 */
     gchar   *key_bind[KEY_ACTION_COUNT];
 
-    /* [net] 网络请求默认值：UA 为 NULL、超时 <= 0 时用 config.h 里的内置值 */
     gchar   *user_agent;
-    gchar   *proxy;             /* 形如 http://127.0.0.1:7890；NULL = 直连 */
-    gint     http_timeout;      /* 整次请求超时，秒 */
-    gint     connect_timeout;   /* 建连超时，秒 */
+    gchar   *proxy;             /* 未配置时直连 */
+    gint     http_timeout;      /* 请求总超时（秒） */
+    gint     connect_timeout;   /* 连接超时（秒） */
 
-    /* [metadata] 歌曲元数据（MusicBrainz）+ 本地 SQLite 缓存 */
-    gboolean metadata_enabled;  /* 关掉后详情页只读本地库，不发任何请求 */
-    gboolean metadata_cover;    /* 配置里没写 pic 时，用数据库封面 */
+    gboolean metadata_enabled;
+    gboolean metadata_cover;
     gchar   *metadata_db;       /* NULL = <cache>/follow/metadata.db */
-    gchar   *metadata_user_agent; /* NULL = 内置的项目 UA（MB 要求） */
+    gchar   *metadata_user_agent;
 
-    /* [audio1], [audio2] ... 按数字顺序排好的曲目表 */
     AudioTrack *tracks;
     gsize       n_tracks;
 } APPconfig;
 
-/* 读取配置文件（不存在 / 缺 key / 读失败都用默认值补齐）。
- * 返回进程内单例，恒非 NULL，调用方不要 free。 */
+/* 加载配置；缺失项使用默认值。返回进程内单例，不得释放。 */
 const APPconfig *config_load(const char *path);
 
-/* 取配置；没 load 过就先返回一份默认值。 */
+/* 获取配置；未加载时返回默认配置。 */
 const APPconfig *config_get(void);
 
-/* 释放内部字符串和曲目表，程序退出时调一次即可（可重复调用）。 */
+/* 释放配置；可重复调用。 */
 void config_free(void);
 
-/* 备注文字：曲目自己的 note 优先，否则用全局 [note] text；都没有返回 NULL */
+/* 备注：曲目 note 优先于全局 note。 */
 const gchar *config_track_note(const APPconfig *cfg, const AudioTrack *track);
 
-/* 循环模式的短名："off" / "all" / "one" */
 const gchar *config_repeat_name(gint repeat);
 
 /* 取第 index 个曲目；越界返回 NULL。 */
 const AudioTrack *config_track_at(const APPconfig *cfg, gsize index);
 
-/* 显示用曲名：title 键优先，其次从文件名/main.exe 里推断；返回新分配的字符串。 */
+/* 显示标题；返回新分配的字符串。 */
 gchar *config_track_title(const AudioTrack *track);
 
-/* 显示用「艺人 - 曲名」；没有 artist 时只返回曲名。返回新分配的字符串。 */
+/* 返回新分配的 "艺人 - 曲名"。 */
 gchar *config_track_label(const AudioTrack *track);
 
-/* uri 是不是 http/https 远程地址（没有 scheme 的按本地路径处理）。 */
+/* 是否为 http/https 地址。 */
 gboolean config_is_remote(const gchar *uri);
 
-/* 有效的网络参数：配置里没写就回落到内置默认（恒非 NULL / 恒 > 0） */
+/* 网络参数：未配置时返回内置默认值。 */
 const gchar *config_user_agent(void);
 gint         config_http_timeout(void);
 gint         config_http_connect_timeout(void);
 
-/* [net] proxy：没配置返回 NULL（直连）；空串也当没配 */
+/* proxy；未配置返回 NULL。 */
 const gchar *config_proxy(void);
 
-/* [metadata] 生效值：
- *   config_metadata_enabled()   是否允许联网查询/补全（默认 TRUE）
- *   config_metadata_cover()     没写 pic 时是否用数据库封面（默认 TRUE）
- *   config_metadata_user_agent() 恒非 NULL
- *   config_metadata_db_path()   返回新分配的 SQLite 路径
- *                               （[metadata] db 或 <cache>/follow/metadata.db） */
+/* 元数据配置。 */
 gboolean     config_metadata_enabled(void);
 gboolean     config_metadata_cover(void);
 const gchar *config_metadata_user_agent(void);
 gchar       *config_metadata_db_path(void);
 
-/* [visualizer] 的生效值：effect 恒非 NULL，particles / gain 恒为合理值 */
+/* 粒子参数：返回经过范围限制的值。 */
 const gchar *config_viz_effect(void);
 gint         config_viz_particles(void);
 double       config_viz_gain(void);
 
-/* [keys] 原始绑定字符串；没写返回 NULL（keymap 用默认值） */
 const gchar *config_key_binding(KeyAction action);
 
-/* [cache] 解析结果 TTL（秒，0 = 关闭）；音频 / 封面缓存上限（字节）。
- * audio 相关访问器是预留接口，当前还没有音频落盘实现。 */
+/* 解析 TTL（秒）；音频 / 封面缓存上限（字节）。 */
 gint    config_resolve_ttl(void);
-gboolean config_audio_cache(void);      /* 预留 */
-guint64 config_audio_max_bytes(void);   /* 预留 */
+gboolean config_audio_cache(void);
+guint64 config_audio_max_bytes(void);
 guint64 config_cover_max_bytes(void);
 
-/* [ui] 动效总开关 */
+/* 动效开关 */
 gboolean config_animations(void);
 void     config_set_animations(gboolean on);
 
-/* [ui] 动态背景刷新率（帧/秒）：默认 30；调高会更费 GPU/CPU，视觉差别很小 */
+/* 动态背景刷新率（帧/秒）。 */
 gint     config_backdrop_fps(void);
 
-/* 把本地路径 / file:// URI 统一成文件系统路径，返回新分配的字符串。 */
+/* 转换为文件系统路径；返回新分配的字符串。 */
 gchar *config_to_local_path(const gchar *uri);
 
-#endif /* FOLLOW_CONFIG_H */
+#endif

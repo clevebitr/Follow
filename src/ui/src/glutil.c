@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "glutil.h"
@@ -16,7 +17,6 @@
 #include "perf.h"
 
 static const float QUAD[] = {
-    /* x, y, u, v */
     0.0f, 0.0f, 0.0f, 0.0f,
     1.0f, 0.0f, 1.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 1.0f,
@@ -140,7 +140,7 @@ GLuint gl_util_texture_from_surface(cairo_surface_t *surface)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    /* cairo ARGB32 在小端内存里是 B,G,R,A，正好对应 GL_BGRA；预乘 alpha 直接可用。 */
+    /* ARGB32 小端 = BGRA，预乘 alpha 可直接使用。 */
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,

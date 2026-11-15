@@ -6,3 +6,4 @@ main.exe.old
 crates/*/target/
 _CPack_Packages/
 *.back
+src/config.local.ini

@@ -1,7 +1,5 @@
-//! MCP 工具：把 uidbg 的命令包成「看一眼 / 点一下 / 等一等」。
-//!
-//! 原则：能用结构化文本说清楚的，就不要截图。`ui_screen` 一条命令就是
-//! 几十行文字（1~3 KB），而一张 2K 截图要几万个 token。
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! MCP 工具：封装 uidbg 命令。优先使用结构化文本，截图仅作后备。
 
 use std::time::{Duration, Instant};
 
@@ -26,8 +24,7 @@ fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(fallback)
 }
 
-/// 输入注进去之后，界面要等下一帧才重画：给个短保险，
-/// 紧接着的 ui_screen 就不会读到旧画面（动画类变化用 ui_wait 等）。
+/// 注入输入后短暂等待重绘，避免 ui_screen 读到旧帧。
 fn settle() {
     std::thread::sleep(Duration::from_millis(200));
 }
@@ -363,7 +360,7 @@ fn ui_screen(client: &Client, args: &Value) -> Result<Vec<Value>, String> {
         for item in items {
             let label = item["t"].as_str().unwrap_or("");
 
-            // layer 过滤：rects / widgets 也要过，因为调用方只想看某一层
+            // 按 layer 过滤 rects 与 widgets
             if let Some(want) = &layer {
                 let got = match group {
                     "widgets" => "gtk",
@@ -540,7 +537,7 @@ fn find_click_target(client: &Client, needle: &str) -> Result<(f64, f64, String)
     let needle = needle.to_lowercase();
     let mut best: Option<(usize, f64, f64, String)> = None;
 
-    // 层级越靠上越优先：palette > lyric > stage > wall-chrome > wall
+    // 层级优先级：palette > lyric > stage > wall-chrome > wall
     fn rank(layer: &str) -> usize {
         match layer {
             "palette" => 0,
@@ -860,7 +857,7 @@ fn ui_launch(client: &Client) -> Result<Vec<Value>, String> {
         return Err(format!("找不到 {}（先 make 出 main.exe）", app.display()));
     }
 
-    // MSYS2 的 GTK 运行时：不把 mingw64/bin 加进 PATH 会缺 DLL
+    // MSYS2 GTK 运行时需要 mingw64/bin 在 PATH 中
     let gtk_bin = std::env::var("FOLLOW_GTK_BIN")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("F:/msys64/mingw64/bin"));

@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "help.h"
@@ -14,7 +15,7 @@
 #include "keymap.h"
 #include "theme.h"
 
-#define ROWS_PER_PANEL 2.2      /* 标题 + 底部留白占的行数 */
+#define ROWS_PER_PANEL 2.2
 
 void help_draw(cairo_t *cr, double width, double height)
 {
@@ -61,7 +62,6 @@ void help_draw(cairo_t *cr, double width, double height)
     key_x   = panel_x + panel_w * 0.07;
     desc_x  = panel_x + panel_w * 0.34;
 
-    /* 压暗整屏 */
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.62);
     cairo_rectangle(cr, 0.0, 0.0, width, height);
     cairo_fill(cr);

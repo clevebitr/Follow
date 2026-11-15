@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "lyricview.h"
@@ -21,10 +22,8 @@
 #include "lyricsrc.h"
 #include "ui.h"
 
-/* 换行过渡时长（秒）：上一行上浮淡出，新行从下面浮上来 */
 #define LYRIC_FADE_SEC 0.42
 
-/* 在音频所在目录里找一个 .lrc */
 static gchar *find_lrc_in_dir(const char *dir, const char *stem)
 {
     g_autoptr(GDir) d           = NULL;
@@ -67,20 +66,18 @@ static gchar *find_lrc_in_dir(const char *dir, const char *stem)
     return NULL;
 }
 
-/* 在线歌词源（后台线程 + 缓存） */
-
 typedef struct {
     guint    gen;
     gchar   *provider;
     gchar   *spec;
     gchar   *artist;
     gchar   *title;
-    gchar   *text;        /* 取回来的 LRC 文本 */
+    gchar   *text;
     gchar   *error;
     gboolean from_cache;
 } LyricsJob;
 
-/* 缓存路径：<user cache>/follow/lyrics-<md5>.lrc */
+/* 歌词缓存路径。 */
 static gchar *lyrics_cache_path(const LyricsJob *job)
 {
     g_autofree gchar *key = g_strdup_printf("%s|%s|%s|%s",
@@ -156,7 +153,7 @@ static gpointer lyrics_thread(gpointer data)
     return NULL;
 }
 
-/* 音频时长和歌词总长差得多 → 提示可能是不同版本 */
+/* 音频与歌词时长差异过大时提示版本不匹配。 */
 static void report_fit(void)
 {
     double duration, lrc_end, diff;
@@ -208,7 +205,6 @@ void lyricview_load(const AudioTrack *track)
 
     app.lyrics_gen++;
 
-    /* 1) 在线歌词源：lrc=netease:... / lrc=qq:... */
     if (track->lrc != NULL && track->lrc[0] != 0) {
         g_autofree gchar *provider = NULL;
         g_autofree gchar *spec     = NULL;
@@ -222,7 +218,6 @@ void lyricview_load(const AudioTrack *track)
             job->artist   = g_strdup(track->artist);
             job->title    = g_strdup(track->title);
 
-            /* 没写 title 就退回文件名（只对本地曲目有意义） */
             if (job->title == NULL && track->link != NULL && !track->link_remote)
                 job->title = config_track_title(track);
 
@@ -236,7 +231,6 @@ void lyricview_load(const AudioTrack *track)
         }
     }
 
-    /* 本地音频的目录和文件名（不含扩展名）：找同名 .lrc，也用来解析相对路径 */
     if (track->link != NULL && !track->link_remote) {
         audio = config_to_local_path(track->link);
 
@@ -252,7 +246,6 @@ void lyricview_load(const AudioTrack *track)
         }
     }
 
-    /* 2) ini 里的 lrc=（本地文件） */
     if (track->lrc != NULL && *track->lrc != '\0') {
         g_autofree gchar *chosen = NULL;
 
@@ -264,7 +257,6 @@ void lyricview_load(const AudioTrack *track)
             if (candidate != NULL && g_file_test(candidate, G_FILE_TEST_EXISTS)) {
                 chosen = g_steal_pointer(&candidate);
             } else if (dir != NULL && !g_path_is_absolute(track->lrc)) {
-                /* 相对路径：按当前目录找不到，就按音频所在目录再试一次 */
                 g_autofree gchar *alt = g_build_filename(dir, track->lrc, NULL);
 
                 if (g_file_test(alt, G_FILE_TEST_EXISTS))
@@ -289,7 +281,6 @@ void lyricview_load(const AudioTrack *track)
         }
     }
 
-    /* 3) 音频旁边的同名 .lrc（ini 没写、或者写了但文件不存在） */
     if (dir != NULL && stem != NULL) {
         g_autofree gchar *found = find_lrc_in_dir(dir, stem);
 
@@ -305,7 +296,6 @@ void lyricview_load(const AudioTrack *track)
     }
 }
 
-/* 两个歌词字符串是不是同一句（NULL = 没歌词） */
 static gboolean text_changed(const gchar *a, const gchar *b)
 {
     if (a == NULL || b == NULL)
@@ -327,13 +317,11 @@ void lyricview_sync(double position_sec)
         report_fit();
     }
 
-    /* 歌词时间轴是按原始音频做的；视频源可能带片头/剪辑，
-     * 所以用 offset 把播放位置平移一下 */
+    /* 视频源可能带片头，按 offset 平移播放位置。 */
     at = position_sec - (double)app.lrc_offset_ms / 1000.0;
 
     {
-        /* 焦点行：跳过只有时间戳的空行（前奏 / 间奏占位），
-         * 句与句之间、长间奏里上一句都留在场上，不会整块空掉 */
+        /* 焦点行跳过只有时间戳的空行。 */
         gssize index = lyrics_focus_at(app.lyrics, at);
 
         cur  = lyrics_text_at(app.lyrics, index);
@@ -346,7 +334,6 @@ void lyricview_sync(double position_sec)
     }
 
     if (text_changed(cur, app.lyric_line)) {
-        /* 旧的当前行交给 prev：过渡时上浮淡出，新行淡入 */
         g_free(app.lyric_prev);
         app.lyric_prev = app.lyric_line;
         app.lyric_line = cur != NULL ? g_strdup(cur) : NULL;
@@ -354,13 +341,9 @@ void lyricview_sync(double position_sec)
         if (app.lyric_line == NULL) {
             fx_stop(&app.fx_lyric);
         } else if (app.lyric_prev != NULL && strcmp(app.lyric_line, app.lyric_prev) == 0) {
-            /* 同一句重复（副歌）：画面本来就不用动 */
             fx_stop(&app.fx_lyric);
         } else if (!lyricgl_ready()) {
-            /* 只有 cairo 回退路径会用这个过渡（fx_t() 在那里推进）；
-             * GPU 歌词层自己有一套动效，不许把 fx 拉起来——否则 fx
-             * 永远停在 active（没人调 fx_t），16ms 动画泵会一直重画整块
-             * 主画布，帧率被白日在 cairo 上吃掉。 */
+            /* 仅 cairo 回退使用歌词过渡；GPU 层自带动效。 */
             fx_begin(&app.fx_lyric, LYRIC_FADE_SEC);
             ui_animate();
         } else {

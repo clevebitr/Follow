@@ -1,19 +1,8 @@
-# ---------------------------------------------------------------------------
-#  Follow · 模块化源码树
-#
-#  每个模块一个独立静态库 + 一个公开 umbrella 头文件，只允许单向依赖：
-#
-#      app ──► ui ──► music ──► net ──► core
-#
-#  单独编译某个模块（不链接可执行文件）：
-#      cmake --build build --target follow_core
-#      cmake --build build --target follow_music
-#
-#  公开头文件在 <module>/include/ 下，随 target_link_libraries 自动传播；
-#  模块内部实现放在 <module>/src/，其它模块不应该 include。
-# ---------------------------------------------------------------------------
+# 模块化源码树：app → ui → music → net → core
+# 每个模块一个静态库与公开头文件；单独编译：
+#   cmake --build build --target follow_<module>
 
-# 所有模块共用的第三方依赖（GTK / curl / json-glib / sqlite3 / FFmpeg ...）
+# 第三方依赖
 add_library(follow_deps INTERFACE)
 target_link_libraries(follow_deps INTERFACE PkgConfig::FOLLOW_DEPS)
 
@@ -31,7 +20,6 @@ function(follow_module name)
         target_link_libraries(follow_${name} PUBLIC follow::${dep})
     endforeach()
 
-    # 第三方依赖只传播 include / 编译选项；静态库不重复链接
     target_link_libraries(follow_${name} PUBLIC follow_deps)
 
     target_compile_options(follow_${name} PRIVATE -Wall -Wextra)
@@ -39,7 +27,7 @@ function(follow_module name)
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 endfunction()
 
-# ------------------------------------------------------------------ core ---
+# core
 follow_module(core
     SOURCES
         core/src/cache.c
@@ -51,7 +39,7 @@ follow_module(core
         core/src/stats.c
         core/src/texture.c)
 
-# ------------------------------------------------------------------- net ---
+# net
 follow_module(net
     SOURCES
         net/src/http.c
@@ -63,7 +51,7 @@ follow_module(net
         net/src/musicbrainz.c
     DEPENDS core)
 
-# ----------------------------------------------------------------- music ---
+# music
 follow_module(music
     SOURCES
         music/src/media.c
@@ -73,16 +61,16 @@ follow_module(music
         music/src/metadata.c
     DEPENDS net core)
 
-# src/models/miniaudio.h 当系统头文件引入：不报它自己的警告
-# media.h 本身就 include "miniaudio.h"，所以这条 include 必须向下游传播
+# miniaudio 作为系统头文件引入
+# media.h 包含 miniaudio.h，需向下游传播
 target_include_directories(follow_music SYSTEM PUBLIC
     "${PROJECT_SOURCE_DIR}/src/models")
 
-# miniaudio 里的原子操作在 -O2 + 内联时会被误报成 stringop-overflow
+# -O2 下 miniaudio 原子操作会误报 stringop-overflow
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/music/src/media.c"
     PROPERTIES COMPILE_OPTIONS "-Wno-stringop-overflow")
 
-# -------------------------------------------------------------------- ui ---
+# ui
 follow_module(ui
     SOURCES
         ui/src/backdrop.c
@@ -108,7 +96,7 @@ follow_module(ui
         ui/src/wallgl.c
     DEPENDS music net core)
 
-# ------------------------------------------------------------- app / exe ---
+# app
 add_executable(follow app/main.c)
 
 add_library(follow_api INTERFACE)

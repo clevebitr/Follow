@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include <math.h>
@@ -86,7 +87,6 @@ void palette_from_rgba(const guchar *rgba, int width, int height, Palette *out)
 
     palette_reset(out);
 
-    /* 没有封面时给一组中性色，让背景不至于死黑 */
     out->seed_r = 0.24; out->seed_g = 0.26; out->seed_b = 0.34;
     out->alt_r  = 0.16; out->alt_g  = 0.18; out->alt_b  = 0.26;
     out->deep_r = 0.08; out->deep_g = 0.09; out->deep_b = 0.13;
@@ -96,7 +96,7 @@ void palette_from_rgba(const guchar *rgba, int width, int height, Palette *out)
 
     memset(bins, 0, sizeof(bins));
 
-    step = MAX(1, MAX(width, height) / 96);   /* 抽样到 ~96px 就够 */
+    step = MAX(1, MAX(width, height) / 96);
 
     for (int y = 0; y < height; y += step) {
         for (int x = 0; x < width; x += step) {
@@ -112,7 +112,7 @@ void palette_from_rgba(const guchar *rgba, int width, int height, Palette *out)
 
             rgb_to_hsv(r, g, b, &h, &s, &v);
 
-            /* 灰、黑、过曝的像素不参与取色；用 s² 加权让"真有颜色"的像素说话 */
+            /* 以饱和度平方加权取色。 */
             if (s < 0.15 || v < 0.12)
                 continue;
 
@@ -134,9 +134,9 @@ void palette_from_rgba(const guchar *rgba, int width, int height, Palette *out)
     }
 
     if (best < 0 || best_weight <= 0.0)
-        return;      /* 灰度封面：保持中性色 */
+        return;
 
-    /* 第二色：色相至少隔开 4 个桶，避免两个色太像 */
+    /* 第二色色相至少间隔 4 个桶。 */
     for (int i = 0; i < HUE_BINS; i++) {
         int d = abs(i - best);
 
@@ -163,7 +163,7 @@ void palette_from_rgba(const guchar *rgba, int width, int height, Palette *out)
         out->alt_b = out->seed_b * 0.7;
     }
 
-    /* 取出来的色如果本身也不够鲜艳，就当成灰度封面，别给背景染上一层怪颜色 */
+    /* 低饱和封面视为灰度。 */
     {
         double h, s, v;
 

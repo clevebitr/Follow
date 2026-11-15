@@ -1,19 +1,5 @@
-# ---------------------------------------------------------------------------
-#  GTK 运行时数据 + DLL 收集（Windows）
-#
-#  只把 DLL 拷进包里是不够的，GTK 还依赖下面这些「数据」，
-#  它们都是**环境变量无关**的：
-#    etc/ssl/certs/              CA 证书（libcurl 默认路径写死在 MSYS2 目录里，
-#                                src/net/src/http.c 会在启动时指到这份）
-#    share/glib-2.0/schemas/     GSettings schema（glib 按 DLL 所在目录找）
-#    share/icons/Adwaita         GTK 标准图标
-#    lib/gdk-pixbuf-2.0/*/loaders 图片加载器（png/jpeg/svg/webp/...）+ loaders.cache
-#                                （gdk-pixbuf 按 DLL 所在目录找缓存，缓存里是相对路径，
-#                                  实测换 CWD 也能加载）
-#
-#  注意：**不用**带 etc/fonts。Windows 上 GTK 走 PangoCairoWin32FontMap
-#  （GDI/DirectWrite），字体直接从系统拿，跟 fontconfig 无关。
-# ---------------------------------------------------------------------------
+# GTK 运行时数据与 DLL 收集（Windows）
+# 携带：CA 证书、GSettings schema、Adwaita 图标、gdk-pixbuf 加载器。
 
 if(NOT WIN32)
     return()
@@ -31,7 +17,7 @@ set(FOLLOW_MINGW_BIN     "${FOLLOW_MINGW_PREFIX}/bin")
 set(FOLLOW_PIXBUF_RELDIR "lib/gdk-pixbuf-2.0/${FOLLOW_PIXBUF_BVER}")
 set(FOLLOW_RUNTIME_DIR   "${CMAKE_BINARY_DIR}/runtime")
 
-# ------------------------------------------------------------ 图片加载器 ----
+# 图片加载器
 file(GLOB FOLLOW_PIXBUF_LOADERS "${FOLLOW_PIXBUF_BINDIR}/loaders/*.dll")
 list(LENGTH FOLLOW_PIXBUF_LOADERS _n)
 if(_n EQUAL 0)
@@ -42,8 +28,7 @@ install(DIRECTORY "${FOLLOW_PIXBUF_BINDIR}/loaders"
         DESTINATION "${FOLLOW_PIXBUF_RELDIR}"
         FILES_MATCHING PATTERN "*.dll")
 
-# loaders.cache：query-loaders 会把传入的绝对路径原样写进缓存，这里统一改写成
-# 相对 exe 的 lib/gdk-pixbuf-2.0/<ver>/loaders/<name>.dll（配合上面的 chdir）。
+# loaders.cache 写入相对 exe 的加载器路径。
 find_program(GDK_PIXBUF_QUERY_LOADERS NAMES gdk-pixbuf-query-loaders REQUIRED)
 
 execute_process(
@@ -68,14 +53,12 @@ set(FOLLOW_PIXBUF_CACHE_FILE "${CMAKE_BINARY_DIR}/pixbuf-loaders.cache")
 file(WRITE "${FOLLOW_PIXBUF_CACHE_FILE}" "${FOLLOW_PIXBUF_CACHE}")
 install(FILES "${FOLLOW_PIXBUF_CACHE_FILE}" DESTINATION "${FOLLOW_PIXBUF_RELDIR}" RENAME loaders.cache)
 
-# ------------------------------------------------------------ CA 证书 ------
-# libcurl 编译时把 CA 路径写死成 MSYS2 的安装位置，包里得带一份；
-# src/net/src/http.c: http_use_bundled_ca() 启动时把它指给 curl。
+# CA 证书
 install(DIRECTORY "${FOLLOW_MINGW_PREFIX}/etc/ssl/certs" DESTINATION etc/ssl
         FILES_MATCHING PATTERN "*.crt")
 install(FILES "${FOLLOW_MINGW_PREFIX}/etc/ssl/cert.pem" DESTINATION etc/ssl)
 
-# ------------------------------------------------------- GSettings schema ----
+# GSettings schema
 find_program(GLIB_COMPILE_SCHEMAS NAMES glib-compile-schemas REQUIRED)
 
 set(_schema_src "${FOLLOW_MINGW_PREFIX}/share/glib-2.0/schemas")
@@ -97,7 +80,7 @@ endif()
 
 install(DIRECTORY "${_schema_out}" DESTINATION share/glib-2.0)
 
-# --------------------------------------------------------------- 图标主题 ---
+# 图标主题
 foreach(_theme Adwaita hicolor)
     if(EXISTS "${FOLLOW_MINGW_PREFIX}/share/icons/${_theme}")
         install(DIRECTORY "${FOLLOW_MINGW_PREFIX}/share/icons/${_theme}"
@@ -105,9 +88,7 @@ foreach(_theme Adwaita hicolor)
     endif()
 endforeach()
 
-# ------------------------------------------------------------------ DLL ----
-# GET_RUNTIME_DEPENDENCIES 只能在 install 阶段跑（那时才拿得到最终 exe 路径），
-# 具体逻辑放 cmake/InstallDlls.cmake，这里把需要的变量递过去。
+# DLL
 install(CODE "
     set(FOLLOW_EXE                   \"$<TARGET_FILE:follow>\")
     set(FOLLOW_MINGW_BIN             \"${FOLLOW_MINGW_BIN}\")

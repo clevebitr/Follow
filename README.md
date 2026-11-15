@@ -8,6 +8,9 @@
 
 </div>
 
+[![build](https://github.com/clevebitr/Follow/actions/workflows/build.yml/badge.svg)](https://github.com/clevebitr/Follow/actions/workflows/build.yml)
+[![license: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+
 <img src="gallery/app.png" alt="Follow_app">
 
 ## 开始使用
@@ -39,7 +42,7 @@ cmake --build build        # 产物是 ./main.exe
 ./main.exe                 # 在项目根目录跑：资源路径是相对的
 ```
 
-配置文件是 `src/config.ini`（[GKeyFile](https://docs.gtk.org/glib/struct.KeyFile.html) 格式，手写），命令面板里的 `Open Config File...` 会用系统默认编辑器打开它，改完再用 `Reload config.ini` 生效。最小示例：
+配置文件默认是 `src/config.ini`（[GKeyFile](https://docs.gtk.org/glib/struct.KeyFile.html) 格式，手写），命令面板里的 `Open Config File...` 会打开当前生效的配置文件，改完再用 `Reload config.ini` 生效。个人配置可放到 `src/config.local.ini`（存在时优先读取，已被 `.gitignore` 忽略，不会进入发布包），也可以用 `FOLLOW_CONFIG` 指定路径。最小示例：
 
 ```ini
 [window]
@@ -80,6 +83,13 @@ link=https://www.youtube.com/watch?v=YudHcBIxlYw    # YouTube 同样会解析（
 cmake --preset mingw64
 cmake --build build
 ```
+
+GitHub Actions（`.github/workflows/build.yml`）在 push / PR 时构建两个平台：
+
+- **Windows x64**：MSYS2 MINGW64，上传 `dist/` 运行目录（含 DLL 与资源）。
+- **Linux x86_64**：Ubuntu 24.04，安装 GTK4 / FFmpeg / libcurl 等依赖后编译。
+
+发布：推送 `v*` 标签（或手动运行 release workflow）会创建 GitHub Release，附件包括 Windows NSIS 安装包、Windows 便携包和 Linux x86_64 包（tar.gz，含 `install.sh`）。版本号默认取 `CMakeLists.txt` 的 `FOLLOW_VERSION`，release workflow 会用标签覆盖。Linux 包解压后执行 `cd Follow && ./install.sh` 可安装到 `~/.local`。
 
 
 ## 功能
@@ -221,16 +231,24 @@ cmake --build build --target follow_ui
 
 新增功能时按依赖方向挑层：只处理数据/协议放 `net`，和「歌」有关的业务状态放 `music`，GTK / cairo 放 `ui`，`app` 只做接线。`src/ui/include/details.h` + `src/music/include/metadata.h` 可以作为一条完整的新增链路参考。
 
+## 许可证
+
+本项目采用 [GNU General Public License v3.0 or later](LICENSE)。
+
+- 允许使用、修改与再分发；衍生作品须以同一许可证开源，并提供对应源代码。
+- 允许商业使用，但商业分发同样受 GPL 约束。
+- 第三方依赖（GTK、FFmpeg、libcurl、SQLite、miniaudio 等）遵循各自许可证；MSYS2 的 FFmpeg 为 GPLv3 构建。
+
 ## 免责声明 / Disclaimer
 
-**本项目仅供学习与技术研究使用。**
+**本项目以 GPL-3.0-or-later 发布，主要用于学习与技术研究。**
 
 - 作者**不提供、不托管、不分发**任何音视频内容。播放的内容全部由使用者自己提供或指定，版权归各自权利人所有。
-- `src/net/bilibili.c` 使用 B 站网页端的**非公开接口**并附带 Referer 头来获取音频流地址；`src/net/youtube.c` 调用 YouTube 的 InnerTube 接口并伪装成官方客户端；`src/music/lyricsrc.c` 同理访问网易云 / QQ 音乐；`src/net/musicbrainz.c` 使用 MusicBrainz / Cover Art Archive 的公开 API。这些做法**可能违反对应平台的服务条款**，接口也可能随时失效。**请仅用于个人学习，不要用于分发、转售或商业用途，也不要下载 / 保存 / 二次分发内容。**
+- `src/net/bilibili.c` 使用 B 站网页端的**非公开接口**并附带 Referer 头来获取音频流地址；`src/net/youtube.c` 调用 YouTube 的 InnerTube 接口并伪装成官方客户端；`src/music/lyricsrc.c` 同理访问网易云 / QQ 音乐；`src/net/musicbrainz.c` 使用 MusicBrainz / Cover Art Archive 的公开 API。这些做法**可能违反对应平台的服务条款**，接口也可能随时失效。**请勿使用本项目下载、保存或二次分发受版权保护的内容；商业使用须遵守 GPL。**
 - 若需要合规使用，请走各平台官方开放接口，或直接使用你有权访问的音频直链（`http(s)` / HLS）——这条路径不涉及任何平台。
 - 使用者须自行遵守所在地法律法规与平台条款，**因使用本项目产生的一切后果由使用者自行承担**。
 
-> This project is for **learning and research only**. It hosts no media content. Third‑party services are accessed through undocumented endpoints and may violate their Terms of Service. Use at your own risk; the author takes no responsibility for any consequences.
+> This project is licensed under **GPL-3.0-or-later**. It hosts no media content. Third-party services are accessed through undocumented endpoints and may violate their Terms of Service. Use at your own risk; the author takes no responsibility for any consequences.
 
 ## 配置项
 
@@ -290,6 +308,7 @@ cmake --build build --target follow_ui
 | `FOLLOW_WALL_AUTO_CLOSE` / `FOLLOW_WALL_AUTO_REOPEN` | 复现「开墙 → 关墙 → 再开墙」的性能问题 |
 | `FOLLOW_PALETTE_AUTO=1` | 自动打开命令面板 |
 | `FOLLOW_PALETTE_QUERY=vol` | 预填命令面板查询 |
+| `FOLLOW_CONFIG=/path/to/config.ini` | 指定配置文件（优先于 `src/config.local.ini` 与 `src/config.ini`） |
 | `FOLLOW_UIDBG=1` | 开启 MCP 调试通道（默认 7878） |
 | `FOLLOW_UIDBG_PORT=7900` | 指定 MCP 调试端口 |
 

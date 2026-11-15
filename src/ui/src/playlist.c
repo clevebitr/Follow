@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "playlist.h"
@@ -26,9 +27,7 @@
 #include "ui.h"
 #include "wallgl.h"
 
-/* 无限歌曲墙。12x8 的 block 在二维方向重复；每个 block 从几个模板里随机选
- * 一个、随机翻转、随机打乱歌曲顺序。布局思路参考 Folia 的 poster wall，
- * 槽位和实现是我们自己的。 */
+/* 无限歌曲墙：12×8 block 二维重复，模板 / 翻转 / 曲序随机。 */
 
 #define PL_MAX_HITS 320
 #define PL_TEMPLATE_MAX 12
@@ -46,7 +45,7 @@ typedef struct {
 typedef struct {
     int    track;
     int    bx, by, slot;
-    double x, y, w, h;      /* 屏幕坐标 */
+    double x, y, w, h;
 } PlHit;
 
 static void tile_cache_clear(void);
@@ -60,7 +59,6 @@ static struct {
     Fx       close_fx;
     gint64   last_draw_us;
 
-    /* 相机：cam 是世界坐标里视口左上角的位置 */
     double   cam_x, cam_y;
     double   cam_tx, cam_ty;
     double   pan_vx, pan_vy;
@@ -72,32 +70,27 @@ static struct {
     gint64   drag_last_us;
     gint64   last_drag_end_us;
 
-    /* 选中的磁贴实例 */
     gboolean focus_valid;
     int      focus_bx, focus_by, focus_slot, focus_track;
     double   focus_wx, focus_wy, focus_ww, focus_wh;
     gint64   sel_us;
 
-    /* 鼠标悬停的实例 */
     gboolean hover_valid;
     int      hover_bx, hover_by, hover_slot;
 
-    /* 页面几何 */
     double   cell, gap, pitch, block_w, block_h;
     double   pad_x, header_h, bottom_h;
     double   screen_w, screen_h;
 
-    /* 背景：跟随当前 focus 封面的主色缓慢过渡 */
     Palette  bg_pal;
     gboolean bg_has;
     gboolean bg_moving;
 
-    /* 最近一帧的进场 / 退场进度；GL 与 chrome 层共用 */
     double   vis;
-    gboolean gl_chrome;      /* 当前帧墙由 GL 层绘制，chrome 层负责表头 / 底栏 */
-    gboolean frame_dirty;    /* GL 墙需要重建一帧 */
-    int      last_track;     /* 当前曲目变化时刷新“正在播放”标记 */
-    int      last_chrome_track; /* 表头 / 底栏当前展示的 focus 曲目 */
+    gboolean gl_chrome;
+    gboolean frame_dirty;
+    int      last_track;
+    int      last_chrome_track;
 
     PlHit    hit[PL_MAX_HITS];
     int      n_hits;
@@ -105,10 +98,9 @@ static struct {
     gchar   *message;
 } P;
 
-/* 构建 GL 帧时复用，避免每帧 malloc/free */
 static WallGlTile g_frame_tiles[PL_MAX_HITS + 1];
 
-/* 三个 12x8 的 exact-cover 模板。尺寸混合不同，随机选一个就不会每次长得一样。 */
+/* 三个 12×8 exact-cover 模板。 */
 static const PlTemplate g_templates[] = {
     {
         12,
@@ -183,8 +175,6 @@ static void hash_color(const AudioTrack *track, double *r, double *g, double *b)
     *b = c[2];
 }
 
-/* ---------------- 无限 block 几何 ---------------- */
-
 static guint32 mix32(guint32 x)
 {
     x ^= x >> 16;
@@ -215,7 +205,6 @@ static int block_flip(guint32 h)
     return (int)((h >> 8) & 3u);
 }
 
-/* 每个 block 都重新洗一遍 track 顺序，重复到填满槽位为止 */
 static void block_order(guint32 h, int n, int count, int *order)
 {
     guint32 state = mix32(h ^ 0xa511e9b3u);
@@ -249,8 +238,7 @@ static void update_metrics(double w, double h)
     P.gap       = clampd(h * 0.010, 7.0, 14.0);
     P.cell      = clampd(h * 0.078, 50.0, 124.0);
     P.pitch     = P.cell + P.gap;
-    /* 和 Folia 的 layout.ts 一致：block 本身也占一个完整 pitch，
-     * 块与块之间才有一致的间距（12*cell + 11*gap 会在接缝处丢掉这个 gap）。 */
+    /* block 占完整 pitch，保证接缝间距一致。 */
     P.block_w   = 12.0 * P.pitch;
     P.block_h   = 8.0 * P.pitch;
     P.header_h  = clampd(h * 0.145, 72.0, 164.0);
@@ -462,7 +450,7 @@ static void focus_nearest_visible(void)
     }
 }
 
-/* 用户自由拖动后 focus 可能在屏幕外：下一次方向键先落到视野内最近的磁贴 */
+/* focus 在屏幕外时落到视野内最近磁贴。 */
 static void focus_sync_to_view(void)
 {
     double w, h, sx, sy;
@@ -632,8 +620,6 @@ static void focus_page(gint dir)
         focus_set_instance(best_bx, best_by, best_slot, best_track, TRUE);
 }
 
-/* ---------------- 鼠标滚动 ---------------- */
-
 void playlist_pan_begin(double x, double y)
 {
     if (!P.open || P.closing)
@@ -705,7 +691,6 @@ void playlist_pan_end(double offset_x, double offset_y)
 
     speed = hypot(P.pan_vx, P.pan_vy);
 
-    /* 拖到新区域后，把选中焦点落到视野内最近的磁贴上 */
     focus_sync_to_view();
 
     if (!config_animations() || speed < 120.0 ||
@@ -746,8 +731,6 @@ gboolean playlist_was_dragging(void)
     return P.dragging ||
            (now_us() - P.last_drag_end_us < 260000);
 }
-
-/* ---------------- 绘制 ---------------- */
 
 static void draw_placeholder(cairo_t *cr, gsize index, const AudioTrack *track,
                              double x, double y, double size, double radius)
@@ -844,7 +827,6 @@ static void draw_tile_content(cairo_t *cr, gsize track_index,
 
     draw_cover_image(cr, track_index, track, x, y, w, h, radius, full_cover);
 
-    /* 海报叠色：封面主色以极低透明度铺一层，整面墙的色调会更统一 */
     if (pal != NULL && pal->has) {
         cairo_save(cr);
         path_round_rect(cr, x, y, w, h, radius);
@@ -912,12 +894,12 @@ static void draw_tile_content(cairo_t *cr, gsize track_index,
     }
 }
 
-/* 静态磁贴内容缓存：滚动/选中动画时只 blit，不再每帧排 Pango、缩放封面。 */
+/* 磁贴内容缓存：滚动 / 选中时只 blit。 */
 typedef struct {
     cairo_surface_t *surface;
     gsize            track;
     int              w, h;
-    int              scale;      /* 1 = 逻辑像素，2 = HiDPI 设备像素渲染 */
+    int              scale;
     gint64           version;
     gint64           used_us;
     gboolean         used;
@@ -940,7 +922,6 @@ typedef struct {
 
 static PlOverlayCache g_overlay_cache[PL_OVERLAY_CACHE_MAX];
 
-/* 普通磁贴的细边框；和磁贴内容一起缓存进纹理。 */
 static void draw_normal_border(cairo_t *cr, double x, double y, double w, double h)
 {
     color_set(cr, WHITE(0.05));
@@ -1025,8 +1006,7 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     cairo_scale(cr, scale, scale);
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
-    /* 磁贴是离屏渲染的，坐标是磁贴局部坐标：告诉 uidbg 别记，
-     * 否则屏幕上会多出一堆对不上位置的“字”。 */
+    /* 磁贴为离屏局部坐标，不记录到 uidbg。 */
     uidbg_suppress(TRUE);
     draw_tile_content(cr, track, 0.0, 0.0, (double)w, (double)h, TRUE);
     draw_normal_border(cr, 0.0, 0.0, (double)w, (double)h);
@@ -1045,11 +1025,7 @@ static cairo_surface_t *tile_cache_get(gsize track, int w, int h, gint64 version
     return surface;
 }
 
-/* ---------------- 磁贴异步预热 ----------------
- * 2K / 4K 上一张磁贴要重排 Pango、缩放封面，单张 2-4ms。整屏 40+ 张
- * 同步渲染会把打开墙卡住 100ms 以上，快速拖动时也会丢帧。这里把
- * “生成 cairo 磁贴”放进低优先级空闲任务，每轮只吃几毫秒，生成完
- * 再通知 wallgl 上传纹理。 */
+/* 磁贴异步预热：低优先级队列，每轮约 3ms。 */
 
 typedef struct {
     gsize track;
@@ -1110,7 +1086,6 @@ static gboolean tile_job_step(gpointer data)
 
     (void)data;
 
-    /* 每轮最多占用 ~3ms，把剩下的时间还给 60fps 动画。 */
     while (!g_queue_is_empty(&g_tile_jobs)) {
         PlTileJob *job = g_queue_pop_head(&g_tile_jobs);
         gint64     version = covercache_version(job->track);
@@ -1149,8 +1124,6 @@ static void tile_jobs_clear(void)
         g_free(g_queue_pop_head(&g_tile_jobs));
 }
 
-/* 磁贴上的标记层：当前曲目强调条 / ♪、选中描边、悬停边框。
- * 单独抬出来，cairo 回退和 GL 纹理共用同一套绘制。 */
 static void draw_tile_decoration(cairo_t *cr, gsize track_index,
                                  double x, double y, double w, double h,
                                  gboolean selected, gboolean hovered,
@@ -1222,7 +1195,6 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
         cairo_translate(cr, -(x + w * 0.5), -(y + h * 0.5));
     }
 
-    /* 选中磁贴：先用封面主色在周围垫一层柔光 */
     if (selected && pal != NULL && pal->has) {
         double           cx = x + w * 0.5, cy = y + h * 0.5;
         double           rr = MAX(w, h) * 0.68;
@@ -1248,7 +1220,6 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
 
         if (cached != NULL) {
             if (cover != NULL && reveal < 0.999) {
-                /* 封面正在淡入：底下先铺占位色，再把缓存整块按 alpha 叠上去 */
                 cairo_save(cr);
                 path_round_rect(cr, x, y, w, h, radius);
                 cairo_clip(cr);
@@ -1261,8 +1232,6 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
             cairo_set_source_surface(cr, cached, x, y);
             cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_FAST);
 
-            /* 封面还没加载好时，缓存本身就是“占位底 + 标题”的磁贴；
-             * 不能乘 reveal（0）否则整块磁贴会隐形。 */
             if (cover == NULL || reveal >= 0.999)
                 cairo_paint(cr);
             else
@@ -1279,8 +1248,7 @@ static void draw_tile(cairo_t *cr, gsize track_index, double x, double y,
         cairo_restore(cr);
 }
 
-/* GL 层用的标记纹理：只有选中 / 悬停 / 当前曲目时才生成。
- * 四周留 4px 给选中描边的外描边。 */
+/* GL 标记纹理；四周留 4px 给选中描边。 */
 cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
                                        gboolean selected, gboolean hovered,
                                        gboolean current, int scale)
@@ -1352,7 +1320,6 @@ cairo_surface_t *playlist_tile_overlay(gsize track, int w, int h,
     return surface;
 }
 
-/* 当前应该拿来给整屏置色的封面：优先 focus，还没就位时先用正在播放的那首。 */
 static const Palette *background_palette(void)
 {
     if (P.bg_has && P.bg_pal.has)
@@ -1375,7 +1342,6 @@ static void background_color(double *r, double *g, double *b)
         pb = pal->seed_b;
     }
 
-    /* 底色只给一点点色相，真正的置色交给两团柔光（和 Folia 的 root 一样） */
     *r = 0.012 + pr * 0.035;
     *g = 0.013 + pg * 0.035;
     *b = 0.018 + pb * 0.035;
@@ -1432,7 +1398,6 @@ static void draw_background(cairo_t *cr, double w, double h)
     cairo_rectangle(cr, 0.0, 0.0, w, h);
     cairo_fill(cr);
 
-    /* 两团柔光铺满整屏：SONGS 那一行也会被置色 */
     draw_tint(cr, w, h);
 }
 
@@ -1456,8 +1421,6 @@ static void draw_header(cairo_t *cr, double w, double h, gsize n_tracks)
         const Palette *pal = background_palette();
         double         vr = 0.006, vg = 0.007, vb = 0.012;
 
-        /* 和底栏一样：整条实心颜色衬 + 一条细线收边。
-         * 不做淡出，否则渐变尾段会变成一条“既不是衬、也不是墙”的灰带。 */
         if (pal != NULL) {
             vr = 0.004 + pal->seed_r * 0.07;
             vg = 0.005 + pal->seed_g * 0.07;
@@ -1673,9 +1636,7 @@ static void draw_wall(cairo_t *cr, double w, double h)
         }
     }
 
-
     if (focus_drawn) {
-        /* 选中时把周围压暗一点，focus 磁贴更突出 */
         cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.30);
         cairo_rectangle(cr, 0.0, P.header_h, w, MAX(0.0, h - P.header_h - P.bottom_h));
         cairo_fill(cr);
@@ -1724,8 +1685,7 @@ static void warm_tile_cache(double w, double h)
         }
     }
 
-    /* 选中 / focus 的那一张先同步画出来，进场第一帧就有内容；
-     * 其余磁贴由低优先级队列补上。 */
+    /* focus 磁贴同步绘制，其余异步补齐。 */
     if (P.focus_valid) {
         int scale = wallgl_ready() ? wallgl_tile_scale() : 1;
 
@@ -1734,8 +1694,6 @@ static void warm_tile_cache(double w, double h)
                        covercache_version((gsize)P.focus_track), scale);
     }
 }
-
-/* ---------------- 对外接口 ---------------- */
 
 void playlist_open_page(void)
 {
@@ -1783,8 +1741,7 @@ void playlist_open_page(void)
         focus_find_track(app.track >= 0 ? app.track : 0, start_bx, start_by, 3);
     }
 
-    /* 封面异步加载：这里不再同步解码所有 track，打开墙不会因为封面 / 调色板
-     * 解码而卡住；可见磁贴先用占位色，封面到了再自动刷新。 */
+    /* 封面异步加载，打开墙不阻塞。 */
     t_covers = now_us();
 
     focus_center_camera(TRUE);
@@ -1905,7 +1862,6 @@ void playlist_request_frame(void)
 
     P.frame_dirty = TRUE;
 
-    /* GL 墙由 ui_animate() 的 16ms 泵重建；cairo 回退仍然要靠画布重绘。 */
     if (!wallgl_ready() && app.canvas != NULL)
         gtk_widget_queue_draw(app.canvas);
 
@@ -2065,7 +2021,6 @@ void playlist_hover(double x, double y)
     }
 }
 
-/* 每帧的相机 / 动效推进。GL 与 cairo 回退共用，返回当前透明度。 */
 static double playlist_frame_update(double w, double h)
 {
     const APPconfig *cfg = config_get();
@@ -2150,9 +2105,7 @@ static double playlist_frame_update(double w, double h)
     if (vis <= 0.001)
         return vis;
 
-    /* 背景主色：跟随 focus 封面做 crossfade。
-     * focus 的封面还没加载完时保留上一次的颜色，不再临时换成正在播放的画面，
-     * 否则把选中的磁贴拖出相机后置色会跳一下 / 看着像失效。 */
+    /* 背景主色跟随 focus 封面渐变；未加载时保持上一次颜色。 */
     if (n_tracks > 0 && P.focus_track >= 0) {
         const Palette *target = covercache_palette((gsize)P.focus_track);
 
@@ -2180,7 +2133,6 @@ static double playlist_frame_update(double w, double h)
     return vis;
 }
 
-/* GL 层：构建可见磁贴列表并推给 wallgl。 */
 void playlist_build_frame(double w, double h)
 {
     const APPconfig *cfg = config_get();

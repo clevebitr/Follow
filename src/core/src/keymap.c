@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/10
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "keymap.h"
@@ -92,7 +93,7 @@ static const struct {
     { "meta",         KEY_DETAILS },
 };
 
-/* 没写 [keys] 时的默认值，和 README / config.ini 保持一致 */
+/* 默认绑定，与 README / config.ini 保持一致。 */
 static const gchar *g_defaults[KEY_ACTION_COUNT] = {
     [KEY_PLAY_PAUSE]   = "space",
     [KEY_SEEK_BACK]    = "Left",
@@ -179,8 +180,7 @@ static guint parse_keyval(const gchar *name)
     if (keyval != GDK_KEY_VoidSymbol)
         return keyval;
 
-    /* GDK 的名字表只认 "bracketleft" 这类全名；单字符直接按 Unicode 认，
-     * 这样 `[`、`]`、`\`、`;` 也能直接写。 */
+    /* 单字符键按 Unicode 解析；其余使用 GDK 键名。 */
     if (g_utf8_strlen(name, -1) == 1) {
         gunichar ch = g_utf8_get_char(name);
 
@@ -211,7 +211,6 @@ static GdkModifierType parse_modifier(const gchar *name)
     return 0;
 }
 
-/* "ctrl+shift+Left" → { Left, CONTROL|SHIFT } */
 static gboolean parse_binding(const gchar *token, KeyBind *out)
 {
     g_auto(GStrv) parts = g_strsplit(token, "+", -1);
@@ -222,7 +221,6 @@ static gboolean parse_binding(const gchar *token, KeyBind *out)
     if (n == 0 || parts[0] == NULL || *parts[0] == '\0')
         return FALSE;
 
-    /* 至少最后一段是键；前面的全是修饰键 */
     for (gsize i = 0; i + 1 < n; i++) {
         GdkModifierType mod = parse_modifier(g_strstrip(parts[i]));
 
@@ -252,7 +250,7 @@ static void parse_action(KeyAction action, const gchar *raw)
 
     if (*raw == '\0' || g_ascii_strcasecmp(raw, "off") == 0 ||
         g_ascii_strcasecmp(raw, "none") == 0)
-        return;      /* 显式解绑 */
+        return;
 
     tokens = g_strsplit_set(raw, ",|", -1);
 
@@ -367,7 +365,7 @@ void keymap_init(void)
         parse_action((KeyAction)a, raw);
         before = g_map[a].n;
 
-        /* 写了但一个都解析不出来：回落到默认值，避免用户把自己锁在门外 */
+        /* 解析失败时回落到默认绑定。 */
         if (before == 0 && *raw != '\0' &&
             g_ascii_strcasecmp(raw, "off") != 0 &&
             g_ascii_strcasecmp(raw, "none") != 0) {

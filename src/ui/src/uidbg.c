@@ -4,9 +4,10 @@
  * github: https://github.com/clevebitr
  * last modified: 2026/11/11
  *
- * 免责声明：本项目仅供学习与技术研究使用。作者不提供、不托管任何音视频内容，
- * 不保证第三方接口的可用性与合法性；内容版权归各自权利人所有。
- * 使用者须自行遵守所在地法律与各平台服务条款，使用后果自负。
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 免责声明：作者不提供、不托管任何音视频内容，不保证第三方接口的可用性与合法性；
+ * 内容版权归各自权利人所有，使用者须自行遵守所在地法律与各平台服务条款。
  */
 
 #include "uidbg.h"
@@ -27,14 +28,14 @@
 #include "wallgl.h"
 
 typedef struct {
-    gchar *text;   /* 文字内容；衬底记成 tag */
+    gchar *text;
     gchar *tag;
     double x, y, w, h;
     double px;
     Rgba   color;
 } Item;
 
-#define UIDBG_MAX_ITEMS  600      /* 每层最多记多少条，防止墙把内存吃掉 */
+#define UIDBG_MAX_ITEMS  600      /* 每层记录上限。 */
 #define UIDBG_LOG_RING   400
 #define UIDBG_FRAME_RING 120
 
@@ -104,7 +105,6 @@ static void obj_set_opt_str(JsonObject *o, const char *key, const char *value)
         json_object_set_null_member(o, key);
 }
 
-/* #rrggbb */
 static gchar *color_hex(Rgba c)
 {
     return g_strdup_printf("#%02x%02x%02x",
@@ -136,7 +136,6 @@ static double frame_p95_ms(void)
 
     memcpy(tmp, g_frame_gaps, sizeof(gint64) * n);
 
-    /* 插入排序：只有 120 个数，比 qsort 便宜 */
     for (guint i = 1; i < n; i++) {
         gint64 v = tmp[i];
         guint  j = i;
@@ -161,7 +160,6 @@ static double frame_fps(void)
     for (guint i = 0; i < g_frame_gap_n; i++)
         sum += g_frame_gaps[i];
 
-    /* 帧间隔的平均值换算成每秒多少帧 */
     return (double)g_frame_gap_n * 1000000.0 / (double)sum;
 }
 
@@ -305,8 +303,7 @@ void uidbg_frame_begin(void)
 
     now = g_get_monotonic_time();
 
-    /* 只清 cairo 那一层（stage）：歌词层的记录由 lyricgl 自己的 render 负责
-     * 清掉重建，它比 stage_render 晚一步，在这里清会被下一帧抹掉 */
+    /* 只清 stage 层；歌词层由 lyricgl 重建。 */
     uidbg_layer_clear(UIDBG_LAYER_STAGE);
 
     g_frame_start_us = now;
@@ -329,7 +326,7 @@ void uidbg_frame_end(void)
     g_last_render_us = g_get_monotonic_time() - g_frame_start_us;
     g_frame_start_us = 0;
 
-    /* 一帧画完就回到主层：离屏 / 延迟渲染（磁贴、快照）不会把字记到上一帧的层上 */
+    /* 绘制结束回到主层。 */
     g_layer = UIDBG_LAYER_STAGE;
 }
 
@@ -446,7 +443,6 @@ static cairo_surface_t *render_window_surface(int width, int height)
         }
     }
 
-    /* 回退：只有主画布（cairo 层）。画的时候不要重复记录元素。 */
     cairo_destroy(cr);
     cairo_surface_destroy(surface);
 
@@ -637,7 +633,6 @@ static JsonObject *cmd_key(JsonObject *args)
         keyval = gdk_keyval_from_name(part);
     }
 
-    /* 允许 "Tab" 这种名字之外，再兜一层单字符 */
     if (keyval == 0 && g_utf8_strlen(spec, -1) == 1)
         keyval = gdk_unicode_to_keyval(g_utf8_get_char(spec));
 
@@ -710,8 +705,7 @@ static JsonObject *cmd_seek(JsonObject *args)
 
     uidbg_hook_seek(to);
 
-    /* 回读一下：媒体还没 open 时 media_seek 会被直接丢掉，把真实位置
-     * 回给调用方，免得对着一个没生效的 seek 做判断 */
+    /* 回读真实播放位置。 */
     json_object_set_double_member(o, "seconds", to);
     json_object_set_double_member(o, "position", media_position(&app.media));
     json_object_set_boolean_member(o, "ok", TRUE);
@@ -762,7 +756,6 @@ static JsonObject *cmd_logs(JsonObject *args)
 
     g_mutex_lock(&g_log_lock);
 
-    /* ring 从新到旧 */
     for (guint i = 0; i < g_log_count && (gint64)emitted < limit; i++) {
         guint   idx = (g_log_head + UIDBG_LOG_RING - 1 - i) % UIDBG_LOG_RING;
         LogRec *rec = &g_logs[idx];
@@ -916,8 +909,6 @@ static JsonObject *cmd_screenshot(JsonObject *args)
     return o;
 }
 
-/* ---------------- 请求分发 ---------------- */
-
 static gchar *dispatch(const gchar *line)
 {
     g_autoptr(JsonParser) parser = json_parser_new();
@@ -1030,8 +1021,6 @@ static gchar *dispatch(const gchar *line)
     return g_string_free(out, FALSE);
 }
 
-/* ---------------- 连接处理 ---------------- */
-
 typedef struct {
     GSocketConnection *conn;
     GByteArray        *buf;
@@ -1115,7 +1104,6 @@ static gboolean on_conn_io(GSocket *sock, GIOCondition cond, gpointer data)
         }
 
         if (got == 0) {
-            /* 对端关闭 */
             c->source = NULL;
             conn_free(c);
             return G_SOURCE_REMOVE;
@@ -1124,7 +1112,6 @@ static gboolean on_conn_io(GSocket *sock, GIOCondition cond, gpointer data)
         g_byte_array_append(c->buf, (const guint8 *)chunk, (guint)got);
     }
 
-    /* 逐行处理 */
     for (;;) {
         guint8 *data = c->buf->data;
         guint   len  = c->buf->len;
@@ -1133,7 +1120,7 @@ static gboolean on_conn_io(GSocket *sock, GIOCondition cond, gpointer data)
         gchar  *line;
 
         if (nl == NULL) {
-            if (len > 8 * 1024 * 1024)   /* 单行 8MB 上限，防止吃内存 */
+            if (len > 8 * 1024 * 1024)   /* 单行上限 8MB。 */
                 g_byte_array_set_size(c->buf, 0);
             break;
         }
@@ -1167,8 +1154,7 @@ static gboolean on_incoming(GSocketService *service, GSocketConnection *conn,
     c->conn = g_object_ref(conn);
     c->buf  = g_byte_array_new();
 
-    /* 读必须非阻塞：主循环线程里不能等对端。写用 send_with_blocking 强制阻塞，
-     * 大响应（截图）不至于写一半就报 WOULD_BLOCK。 */
+    /* 读非阻塞；写强制阻塞。 */
     g_socket_set_blocking(g_socket_connection_get_socket(conn), FALSE);
 
     c->source = g_socket_create_source(g_socket_connection_get_socket(conn),
@@ -1178,8 +1164,6 @@ static gboolean on_incoming(GSocketService *service, GSocketConnection *conn,
 
     return TRUE;
 }
-
-/* ---------------- 生命周期 ---------------- */
 
 void uidbg_start(GtkWidget *window)
 {
@@ -1201,8 +1185,7 @@ void uidbg_start(GtkWidget *window)
 
     g_service = g_socket_service_new();
 
-    /* 只绑 127.0.0.1：调试通道能注入按键/点击、读整屏文字，
-     * 不能挂到 0.0.0.0 上让局域网里的人也能连。 */
+    /* 仅绑定 127.0.0.1。 */
     {
         GInetAddress   *loopback = g_inet_address_new_loopback(G_SOCKET_FAMILY_IPV4);
         GSocketAddress *address  = g_inet_socket_address_new(loopback, (guint16)g_port);
