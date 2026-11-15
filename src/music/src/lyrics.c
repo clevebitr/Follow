@@ -545,7 +545,11 @@ static Lyrics *lyrics_from_raw(RawLyrics *raw)
         n++;
     }
 
+#if GLIB_CHECK_VERSION(2, 82, 0)
     g_sort_array(tmp, n, sizeof(TmpLine), compare_lines, NULL);
+#else
+    g_qsort_with_data(tmp, (gint)n, sizeof(TmpLine), compare_lines, NULL);
+#endif
 
     if (n == 0) {
         g_free(tmp);

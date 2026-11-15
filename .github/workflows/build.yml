@@ -25,21 +25,21 @@ jobs:
 
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-gtk4
-            mingw-w64-x86_64-libepoxy
-            mingw-w64-x86_64-libqrencode
-            mingw-w64-x86_64-curl
-            mingw-w64-x86_64-json-glib
-            mingw-w64-x86_64-sqlite3
-            mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libepoxy
+            mingw-w64-ucrt-x86_64-qrencode
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-json-glib
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-librsvg
 
       - name: Configure
         run: >

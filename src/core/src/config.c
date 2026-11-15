@@ -301,8 +301,14 @@ static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
             names[n_names++] = groups[i];
     }
 
-    if (n_names > 1)
+    if (n_names > 1) {
+#if GLIB_CHECK_VERSION(2, 82, 0)
         g_sort_array(names, n_names, sizeof(gchar *), compare_track_groups, NULL);
+#else
+        g_qsort_with_data(names, (gint)n_names, sizeof(gchar *),
+                          compare_track_groups, NULL);
+#endif
+    }
 
     cfg->tracks = g_new0(AudioTrack, n_names);
 

@@ -86,7 +86,7 @@ cmake --build build
 
 GitHub Actions（`.github/workflows/build.yml`）在 push / PR 时构建两个平台：
 
-- **Windows x64**：MSYS2 MINGW64，上传 `dist/` 运行目录（含 DLL 与资源）。
+- **Windows x64**：MSYS2 UCRT64（MINGW64 已被 MSYS2 弃用），上传 `dist/` 运行目录（含 DLL 与资源）。
 - **Linux x86_64**：Ubuntu 24.04，安装 GTK4 / FFmpeg / libcurl 等依赖后编译。
 
 发布：推送 `v*` 标签（或手动运行 release workflow）会创建 GitHub Release，附件包括 Windows NSIS 安装包、Windows 便携包和 Linux x86_64 包（tar.gz，含 `install.sh`）。版本号默认取 `CMakeLists.txt` 的 `FOLLOW_VERSION`，release workflow 会用标签覆盖。Linux 包解压后执行 `cd Follow && ./install.sh` 可安装到 `~/.local`。
