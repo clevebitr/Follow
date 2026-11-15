@@ -265,8 +265,10 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
         const double rise = L->lyric_px * 1.1;
         TextStyle    cur  = TEXT_STYLE(FONT_MONO, L->lyric_px, PANGO_WEIGHT_BOLD,
                                        L->lyric_px * 0.10, WHITE(0.96));
+        /* 没唱到 / 刚唱完的行用淡灰，白色只留给正在演出的那句 */
         TextStyle    nxt  = TEXT_STYLE(FONT_MONO, L->lyric_next_px, PANGO_WEIGHT_BOLD,
-                                       L->lyric_next_px * 0.10, WHITE(0.45));
+                                       L->lyric_next_px * 0.10,
+                                       RGBA(0.76, 0.76, 0.80, 0.50));
         gboolean     has_cur  = app.lyric_line != NULL && *app.lyric_line != '\0';
         gboolean     has_next = app.lyric_next != NULL && *app.lyric_next != '\0';
         gboolean     drew     = FALSE;
@@ -280,7 +282,7 @@ static gboolean draw_lyrics(cairo_t *cr, const Layout *L)
         if (app.lyric_prev != NULL && *app.lyric_prev != '\0' && t < 1.0) {
             TextStyle out = cur;
 
-            out.color.a = 0.96 * (1.0 - t);
+            out.color = RGBA(0.76, 0.76, 0.80, 0.86 * (1.0 - t));
             text_draw_block(cr, app.lyric_prev, &out, L->left_x, y - rise * t,
                             TEXT_LEFT, L->lyric_w, 0);
             drew = TRUE;

@@ -109,6 +109,10 @@
 #define PREV_ALPHA        0.58
 #define DIM_ALPHA_1       0.72
 
+/* 未演出 / 已唱完的行用淡灰，白色只留给正在演出的那一句。
+ * 亮度仍由上面的 alpha 与模糊控制，所以层次不变，只是不再“发白”。 */
+#define COL_LYRIC_DIM     RGBA(0.76, 0.76, 0.80, 1.0)
+
 /* ---------------- shader ---------------- */
 
 /* 单位四边形 -> u_rect（设备像素，左上原点），可绕 u_origin 缩放 */
@@ -269,10 +273,12 @@ typedef struct {
 
     /* 目标值 */
     double  y_t, alpha_t, scale_t, blur_t, tint_t;
+    /* dim：字色从白（0）到淡灰（1）的过渡，跟着 tint 一起动画 */
+    double  dim_t;
     /* y 的起跑延迟：越往下的行越晚动，间距会先拉开再收回 */
     double  y_pending, y_wait, y_delay;
-    /* 当前值：y / scale 走弹簧，alpha / blur / tint 指数收敛 */
-    double  y, vy, alpha, scale, vscale, blur, tint;
+    /* 当前值：y / scale 走弹簧，alpha / blur / tint / dim 指数收敛 */
+    double  y, vy, alpha, scale, vscale, blur, tint, dim;
     Rgba    col;          /* 本帧字色（白 ←→ 种子色按 tint 混好） */
     double  progress;     /* 这行唱到哪了（0..1；非当前行恒为 1） */
 
@@ -1057,7 +1063,8 @@ static gboolean line_animating(const Line *l)
            fabs(l->alpha_t - l->alpha) > 0.004 ||
            fabs(l->scale_t - l->scale) > 0.0005 || fabs(l->vscale) > 0.02 ||
            fabs(l->blur_t - l->blur) > 0.02 ||
-           fabs(l->tint_t - l->tint) > 0.004;
+           fabs(l->tint_t - l->tint) > 0.004 ||
+           fabs(l->dim_t - l->dim) > 0.004;
 }
 
 /* 当前行仍在逐字推进（暂停或整行高亮时不需要） */
@@ -1091,12 +1098,14 @@ static gboolean anything_animating(void)
 static double g_pos_stiff = POS_MIN_STIFF;
 static double g_pos_damp  = POS_MIN_STIFF;
 
-/* 本帧字色：白字与种子色按 tint 混合 */
+/* 本帧字色：非演出行先用淡灰打底，再和种子色按 tint 混合。
+ * 正在演出的那句 dim→0，所以仍是原来的白 / 种子色。 */
 static void line_color(Line *l)
 {
-    double t = g_geom.accent.a > 0.01 ? l->tint : 0.0;
+    double t    = g_geom.accent.a > 0.01 ? l->tint : 0.0;
+    Rgba   base = mix_color(col_text, COL_LYRIC_DIM, l->dim);
 
-    l->col = mix_color(col_text, g_geom.accent, t);
+    l->col = mix_color(base, g_geom.accent, t);
 }
 
 static void line_step(Line *l, double dt)
@@ -1139,7 +1148,7 @@ static void line_step(Line *l, double dt)
         l->vy = 0.0;
     }
 
-    /* 透明度 / 模糊 / 高亮走指数收敛 */
+    /* 透明度 / 模糊 / 高亮 / 淡灰打底走指数收敛 */
     l->alpha += (l->alpha_t - l->alpha) * (1.0 - exp(-dt / l->alpha_tau));
     l->blur  += (l->blur_t - l->blur) * (1.0 - exp(-dt / BLUR_RAMP_TAU));
 
@@ -1147,6 +1156,8 @@ static void line_step(Line *l, double dt)
         double tau = l->tint_t > l->tint ? TINT_TAU : l->tint_tau;
 
         l->tint += (l->tint_t - l->tint) * (1.0 - exp(-dt / MAX(tau, 0.02)));
+        l->dim  += (l->dim_t - l->dim)
+                 * (1.0 - exp(-dt / MAX(l->tint_tau, 0.02)));
     }
 
     line_color(l);
@@ -1540,6 +1551,7 @@ static Line *line_begin(gssize idx, const gchar *text, int d)
         line->alpha     = d == 0 ? 0.45 : 0.0;
         line->scale     = d < 0 ? SCALE_PREV : SCALE_INACTIVE;
         line->blur      = d < 0 ? BLUR_PREV : (d == 0 ? 0.0 : BLUR_P1);
+        line->dim       = d == 0 ? 0.0 : 1.0;
     }
 
     line->role       = d;
@@ -1559,6 +1571,7 @@ static Line *line_begin(gssize idx, const gchar *text, int d)
     line->alpha_t = alpha;
     line->scale_t = scale;
     line->blur_t  = blur;
+    line->dim_t   = d == 0 ? 0.0 : 1.0;
     line->progress = d == 0 && line->char_ms != NULL ? scan_progress(idx) : 1.0;
     line->char_ms  = line_has_words(idx)
         ? g_lyrics->lines[idx].char_ms : NULL;
@@ -1826,6 +1839,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
             l->scale_t = scale;
             l->blur_t  = blur;
             l->tint_t  = tint;
+            l->dim_t   = 1.0;
             l->tint_tau = TINT_OUT_TAU;
 
             /* 目标上移一个槽距 */
@@ -1855,6 +1869,7 @@ void lyricgl_set_view(const Lyrics *lyrics, gssize index, const LyricViewGeom *g
             l->blur     = l->blur_t;
             l->alpha    = l->alpha_t;
             l->tint     = l->tint_t;
+            l->dim      = l->dim_t;
             line_color(l);
         }
     }
