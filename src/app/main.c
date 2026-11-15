@@ -28,6 +28,7 @@
 
 #include "backdrop.h"
 #include "appicon.h"
+#include "backup.h"
 #include "backdropgl.h"
 #include "cache.h"
 #include "config.h"
@@ -53,6 +54,7 @@
 #include "uidbg.h"
 #include "viz.h"
 #include "wallgl.h"
+#include "webdavui.h"
 
 #ifndef FOLLOW_APP_ID
 #define FOLLOW_APP_ID "org.github.clevebitr.follow"
@@ -67,26 +69,9 @@
 #ifndef CONFIG_PATH
 #define CONFIG_PATH "src/config.ini"
 #endif
-#ifndef CONFIG_LOCAL_PATH
-#define CONFIG_LOCAL_PATH "src/config.local.ini"
-#endif
 #define TICK_MS     100
 
 App app;
-
-/* 优先使用 FOLLOW_CONFIG；其次同目录的 config.local.ini；最后是通用 config.ini。 */
-static const gchar *active_config_path(void)
-{
-    const gchar *env = g_getenv("FOLLOW_CONFIG");
-
-    if (env != NULL && *env != '\0')
-        return env;
-
-    if (g_file_test(CONFIG_LOCAL_PATH, G_FILE_TEST_IS_REGULAR))
-        return CONFIG_LOCAL_PATH;
-
-    return CONFIG_PATH;
-}
 
 static gboolean on_tick(gpointer data);
 static gboolean on_anim_tick(gpointer data);
@@ -402,7 +387,7 @@ void ui_toggle_fullscreen(void)
 /* 打开配置文件：GIO → ShellExecuteW → notepad。 */
 gchar *ui_open_config_file(void)
 {
-    g_autofree gchar *path = g_canonicalize_filename(active_config_path(), NULL);
+    g_autofree gchar *path = g_canonicalize_filename(config_active_path(), NULL);
 
     if (!g_file_test(path, G_FILE_TEST_EXISTS))
         return g_strdup_printf("找不到配置文件：%s", path);
@@ -464,7 +449,7 @@ void ui_reload_config(void)
     if (old_track != NULL)
         old_pic = g_strdup(old_track->pic);
 
-    cfg = config_load(active_config_path());
+    cfg = config_load(config_active_path());
 
     keymap_init();
     viz_configure(config_viz_effect(), config_viz_particles(), config_viz_gain());
@@ -509,7 +494,7 @@ void ui_reload_config(void)
     ui_animate();
 
     g_message("config: reloaded %s (%" G_GSIZE_FORMAT " tracks)",
-              active_config_path(), cfg->n_tracks);
+              config_active_path(), cfg->n_tracks);
 }
 
 static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
@@ -548,9 +533,19 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval,
         }
 
         if (ctrl_shift_p) {
+            webdav_ui_close();
             palette_open();
             return TRUE;
         }
+    }
+
+    if (webdav_ui_is_open()) {
+        if (keyval == GDK_KEY_Escape) {
+            webdav_ui_close();
+            return TRUE;
+        }
+
+        return FALSE;
     }
 
     if (details_is_open())
@@ -886,12 +881,22 @@ static GtkWidget *find_text_entry(GtkWidget *widget)
 
 void uidbg_hook_text(const gchar *text)
 {
-    GtkWidget *entry;
+    GtkWidget *entry = NULL;
 
-    if (!palette_is_open())
+    if (!palette_is_open() && !webdav_ui_is_open())
         return;
 
-    entry = find_text_entry(app.window);
+    {
+        GtkRoot *root = gtk_widget_get_root(app.window);
+        GtkWidget *focus = root != NULL ? gtk_root_get_focus(root) : NULL;
+
+        if (GTK_IS_ENTRY(focus) && gtk_widget_get_visible(focus))
+            entry = focus;
+    }
+
+    if (entry == NULL)
+        entry = find_text_entry(app.window);
+
     if (entry == NULL)
         return;
 
@@ -1010,6 +1015,16 @@ static gboolean debug_open_wall(gpointer data)
         g_timeout_add(2000, debug_close_wall, NULL);
     }
 
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean debug_webdav(gpointer data)
+{
+    BackupOp op = (BackupOp)GPOINTER_TO_INT(data);
+
+    stats_save(&app.stats);
+    settings_save();
+    backup_start(op);
     return G_SOURCE_REMOVE;
 }
 
@@ -1223,6 +1238,7 @@ static void activate(GtkApplication *app_, gpointer user_data)
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.chrome);
 
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), palette_new());
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), webdav_ui_new());
 
     app.perf = perf_new(window);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app.perf);
@@ -1327,6 +1343,17 @@ static void activate(GtkApplication *app_, gpointer user_data)
     if (g_getenv("FOLLOW_WALL_AUTO_PAN") != NULL)
         g_timeout_add(1600, debug_pan_start, NULL);
 
+    if (g_getenv("FOLLOW_WEBDAV_AUTO") != NULL) {
+        const gchar *op = g_getenv("FOLLOW_WEBDAV_AUTO");
+
+        if (g_strcmp0(op, "backup") == 0)
+            g_timeout_add(1200, debug_webdav,
+                          GINT_TO_POINTER(BACKUP_OP_BACKUP));
+        else if (g_strcmp0(op, "restore") == 0)
+            g_timeout_add(1200, debug_webdav,
+                          GINT_TO_POINTER(BACKUP_OP_RESTORE));
+    }
+
     if (g_getenv("FOLLOW_EXIT_MS") != NULL)
         g_timeout_add((guint)MAX(100, atoi(g_getenv("FOLLOW_EXIT_MS"))),
                       debug_quit, NULL);
@@ -1357,15 +1384,15 @@ static void startup(GtkApplication *app_, gpointer user_data)
         g_warning("media engine init failed");
 #endif
 
-    if (!g_file_test(active_config_path(), G_FILE_TEST_EXISTS)) {
+    if (!g_file_test(config_active_path(), G_FILE_TEST_EXISTS)) {
         g_warning("config file is not found in: %s (using defaults)",
-                  active_config_path());
+                  config_active_path());
     } else {
-        g_message("config: loading %s (cwd = %s)", active_config_path(),
+        g_message("config: loading %s (cwd = %s)", config_active_path(),
                   g_get_current_dir());
     }
 
-    config_load(active_config_path());
+    config_load(config_active_path());
     metadata_init();
     settings_load();
 
@@ -1459,6 +1486,15 @@ static void shutdown_app(GtkApplication *app_, gpointer user_data)
     stats_clear(&app.stats);
 
     settings_save();
+
+    if (backup_auto_enabled()) {
+        backup_start(BACKUP_OP_BACKUP);
+        backup_wait(5000);
+        backup_cancel();
+    }
+    backup_shutdown();
+    webdav_ui_clear();
+
     settings_clear();
 
     media_clear(&app.media);

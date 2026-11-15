@@ -17,6 +17,7 @@
 
 #include "lyrics.h"
 #include "lyricsrc.h"
+#include "backup.h"
 #include "media.h"
 #include "metadata.h"
 

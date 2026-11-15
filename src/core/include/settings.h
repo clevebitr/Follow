@@ -17,6 +17,8 @@
 
 /* 运行时设置（音量 / 静音 / 输出设备），存于 <cache>/follow/settings.ini。 */
 
+gchar      *settings_file_path(void);
+
 void        settings_load(void);
 void        settings_save(void);
 void        settings_clear(void);

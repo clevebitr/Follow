@@ -23,7 +23,7 @@ static struct {
     gboolean loaded;
 } S = { 1.0, FALSE, NULL, FALSE };
 
-static gchar *settings_path(void)
+gchar *settings_file_path(void)
 {
     gchar *dir  = follow_cache_dir();
     gchar *path = g_build_filename(dir, "settings.ini", NULL);
@@ -35,7 +35,7 @@ static gchar *settings_path(void)
 void settings_load(void)
 {
     g_autoptr(GKeyFile) kf   = g_key_file_new();
-    g_autofree gchar   *path = settings_path();
+    g_autofree gchar   *path = settings_file_path();
     GError             *error = NULL;
     gdouble             volume;
 
@@ -74,7 +74,7 @@ void settings_load(void)
 void settings_save(void)
 {
     g_autoptr(GKeyFile) kf = g_key_file_new();
-    g_autofree gchar   *path = settings_path();
+    g_autofree gchar   *path = settings_file_path();
     g_autofree gchar   *data = NULL;
     gsize               len  = 0;
 

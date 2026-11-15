@@ -54,6 +54,10 @@ file(WRITE "${FOLLOW_PIXBUF_CACHE_FILE}" "${FOLLOW_PIXBUF_CACHE}")
 install(FILES "${FOLLOW_PIXBUF_CACHE_FILE}" DESTINATION "${FOLLOW_PIXBUF_RELDIR}" RENAME loaders.cache)
 
 # CA 证书
+if(NOT EXISTS "${FOLLOW_MINGW_PREFIX}/etc/ssl/certs/ca-bundle.crt")
+    message(WARNING "找不到 CA bundle：请安装 mingw-w64-*-ca-certificates")
+endif()
+
 install(DIRECTORY "${FOLLOW_MINGW_PREFIX}/etc/ssl/certs" DESTINATION etc/ssl
         FILES_MATCHING PATTERN "*.crt")
 install(FILES "${FOLLOW_MINGW_PREFIX}/etc/ssl/cert.pem" DESTINATION etc/ssl)

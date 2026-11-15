@@ -25,6 +25,8 @@ typedef struct {
 void     stats_init(Stats *st);
 void     stats_clear(Stats *st);
 
+gchar   *stats_file_path(void);
+
 gboolean stats_load(Stats *st);
 gboolean stats_save(const Stats *st);
 

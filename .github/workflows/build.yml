@@ -35,6 +35,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libepoxy
             mingw-w64-ucrt-x86_64-qrencode
+            mingw-w64-ucrt-x86_64-ca-certificates
             mingw-w64-ucrt-x86_64-curl
             mingw-w64-ucrt-x86_64-json-glib
             mingw-w64-ucrt-x86_64-sqlite3
@@ -74,7 +75,7 @@ jobs:
             build-essential cmake ninja-build pkg-config \
             libgtk-4-dev libgdk-pixbuf-2.0-dev libepoxy-dev \
             libqrencode-dev libcurl4-openssl-dev libjson-glib-dev \
-            libsqlite3-dev librsvg2-dev \
+            libsqlite3-dev librsvg2-dev libsecret-1-dev \
             libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
 
       - name: Configure

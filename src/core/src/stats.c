@@ -34,7 +34,7 @@ void stats_clear(Stats *st)
     st->total = 0;
 }
 
-static gchar *stats_path(void)
+gchar *stats_file_path(void)
 {
     g_autofree gchar *dir = follow_cache_dir();
 
@@ -43,7 +43,7 @@ static gchar *stats_path(void)
 
 gboolean stats_load(Stats *st)
 {
-    g_autofree gchar *path = stats_path();
+    g_autofree gchar *path = stats_file_path();
     g_autofree gchar *content = NULL;
     gchar           **lines;
 
@@ -89,7 +89,7 @@ gboolean stats_save(const Stats *st)
     if (st == NULL || st->days == NULL)
         return FALSE;
 
-    path = stats_path();
+    path = stats_file_path();
     out  = g_string_new(NULL);
 
     g_hash_table_iter_init(&iter, st->days);

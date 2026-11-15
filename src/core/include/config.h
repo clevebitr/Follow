@@ -109,6 +109,9 @@ const APPconfig *config_load(const char *path);
 /* 获取配置；未加载时返回默认配置。 */
 const APPconfig *config_get(void);
 
+/* 当前生效的配置文件：FOLLOW_CONFIG > src/config.local.ini > src/config.ini。 */
+const gchar *config_active_path(void);
+
 /* 释放配置；可重复调用。 */
 void config_free(void);
 

@@ -24,38 +24,54 @@
 #include "config.h"
 
 #if defined(_WIN32)
-static void http_use_bundled_ca(void)
+static char *g_ca_bundle;
+
+static char *http_find_bundled_ca(void)
 {
-    wchar_t  wbuf[MAX_PATH];
+    wchar_t  exe[MAX_PATH];
+    wchar_t  dir[MAX_PATH];
     wchar_t *slash;
-    char     path[MAX_PATH * 3];
     DWORD    n;
-    int      len;
+    static const wchar_t *candidates[] = {
+        L"\\etc\\ssl\\certs\\ca-bundle.crt",
+        L"\\etc\\ssl\\cert.pem",
+    };
 
-    if (getenv("CURL_CA_BUNDLE") != NULL || getenv("SSL_CERT_FILE") != NULL)
-        return;
-
-    n = GetModuleFileNameW(NULL, wbuf, MAX_PATH);
+    n = GetModuleFileNameW(NULL, exe, MAX_PATH);
     if (n == 0 || n >= MAX_PATH)
-        return;
+        return NULL;
 
-    slash = wcsrchr(wbuf, L'\\');
+    wcscpy(dir, exe);
+    slash = wcsrchr(dir, L'\\');
     if (slash == NULL)
-        return;
+        return NULL;
     *slash = L'\0';
 
-    len = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, path, (int)sizeof(path) - 1, NULL, NULL);
-    if (len <= 0)
-        return;
+    for (gsize i = 0; i < G_N_ELEMENTS(candidates); i++) {
+        wchar_t  path_w[MAX_PATH];
+        char    *path;
+        int      len;
 
-    strncat(path, "\\etc\\ssl\\certs\\ca-bundle.crt",
-            sizeof(path) - strlen(path) - 1);
+        wcsncpy(path_w, dir, MAX_PATH - 1);
+        path_w[MAX_PATH - 1] = L'\0';
+        wcsncat(path_w, candidates[i], MAX_PATH - wcslen(path_w) - 1);
 
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
-        return;
+        if (GetFileAttributesW(path_w) == INVALID_FILE_ATTRIBUTES)
+            continue;
 
-    _putenv_s("CURL_CA_BUNDLE", path);
-    _putenv_s("SSL_CERT_FILE", path);
+        len = WideCharToMultiByte(CP_UTF8, 0, path_w, -1, NULL, 0, NULL, NULL);
+        if (len <= 0)
+            continue;
+
+        path = g_malloc((gsize)len);
+        WideCharToMultiByte(CP_UTF8, 0, path_w, -1, path, len, NULL, NULL);
+
+        _putenv_s("CURL_CA_BUNDLE", path);
+        _putenv_s("SSL_CERT_FILE", path);
+        return path;
+    }
+
+    return NULL;
 }
 #endif
 
@@ -65,9 +81,10 @@ typedef struct {
     size_t cap;
 } Buffer;
 
-/* GET / POST 公共实现；body == NULL 为 GET。 */
-static int http_request(const char *url, const char *body, const char *headers,
-                        HttpResponse *resp, long timeout_sec);
+/* 通用请求实现；method == NULL 时按 GET 处理。 */
+static int http_perform(const char *method, const char *url,
+                        const void *body, size_t body_len, const char *headers,
+                        const char *userpwd, HttpResponse *resp, long timeout_sec);
 
 static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
@@ -99,7 +116,8 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 int http_global_init(void)
 {
 #if defined(_WIN32)
-    http_use_bundled_ca();
+    if (getenv("CURL_CA_BUNDLE") == NULL && getenv("SSL_CERT_FILE") == NULL)
+        g_ca_bundle = http_find_bundled_ca();
 #endif
 
     return curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK ? 0 : -1;
@@ -108,10 +126,15 @@ int http_global_init(void)
 void http_global_cleanup(void)
 {
     curl_global_cleanup();
+#if defined(_WIN32)
+    g_free(g_ca_bundle);
+    g_ca_bundle = NULL;
+#endif
 }
 
-static int http_request(const char *url, const char *body, const char *headers,
-                        HttpResponse *resp, long timeout_sec)
+static int http_perform(const char *method, const char *url,
+                        const void *body, size_t body_len, const char *headers,
+                        const char *userpwd, HttpResponse *resp, long timeout_sec)
 {
     Buffer            buf = {0};
     CURL             *curl;
@@ -161,11 +184,32 @@ static int http_request(const char *url, const char *body, const char *headers,
             curl_easy_setopt(curl, CURLOPT_USERAGENT, config_user_agent());
     }
 
-    if (body != NULL) {
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
+    if (method != NULL && g_ascii_strcasecmp(method, "GET") != 0) {
+        if (g_ascii_strcasecmp(method, "POST") == 0)
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        else
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     }
+
+    if (method != NULL && g_ascii_strcasecmp(method, "HEAD") == 0)
+        curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+
+    if (body != NULL) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+    }
+
+    if (userpwd != NULL && *userpwd != '\0') {
+        curl_easy_setopt(curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_ANY);
+        curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    }
+
+#if defined(_WIN32)
+    if (g_ca_bundle != NULL)
+        curl_easy_setopt(curl, CURLOPT_CAINFO, g_ca_bundle);
+    else if (getenv("CURL_CA_BUNDLE") == NULL && getenv("SSL_CERT_FILE") == NULL)
+        curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
+#endif
 
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, resp->error);
 
@@ -218,16 +262,26 @@ static int http_request(const char *url, const char *body, const char *headers,
     return 0;
 }
 
+int http_request_ex(const char *method, const char *url,
+                    const void *body, size_t body_len,
+                    const char *headers, const char *userpwd,
+                    HttpResponse *resp, long timeout_sec)
+{
+    return http_perform(method, url, body, body_len, headers, userpwd,
+                        resp, timeout_sec);
+}
+
 int http_get_with_headers(const char *url, const char *headers,
                           HttpResponse *resp, long timeout_sec)
 {
-    return http_request(url, NULL, headers, resp, timeout_sec);
+    return http_perform("GET", url, NULL, 0, headers, NULL, resp, timeout_sec);
 }
 
 int http_post_with_headers(const char *url, const char *body, const char *headers,
                            HttpResponse *resp, long timeout_sec)
 {
-    return http_request(url, body, headers, resp, timeout_sec);
+    return http_perform("POST", url, body, body ? strlen(body) : 0,
+                        headers, NULL, resp, timeout_sec);
 }
 
 int http_get(const char *url, HttpResponse *resp, long timeout_sec)

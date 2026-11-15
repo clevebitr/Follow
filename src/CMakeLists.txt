@@ -33,11 +33,13 @@ follow_module(core
         core/src/cache.c
         core/src/config.c
         core/src/keymap.c
+        core/src/keyring.c
         core/src/palette.c
         core/src/platform.c
         core/src/settings.c
         core/src/stats.c
-        core/src/texture.c)
+        core/src/texture.c
+        core/src/webdavsettings.c)
 
 # net
 follow_module(net
@@ -49,6 +51,7 @@ follow_module(net
         net/src/bilibili.c
         net/src/youtube.c
         net/src/musicbrainz.c
+        net/src/webdav.c
     DEPENDS core)
 
 # music
@@ -57,6 +60,7 @@ follow_module(music
         music/src/media.c
         music/src/lyrics.c
         music/src/lyricsrc.c
+        music/src/backup.c
         music/src/metadb.c
         music/src/metadata.c
     DEPENDS net core)
@@ -95,6 +99,7 @@ follow_module(ui
         ui/src/uidbg.c
         ui/src/viz.c
         ui/src/wallgl.c
+        ui/src/webdavui.c
     DEPENDS music net core)
 
 # app

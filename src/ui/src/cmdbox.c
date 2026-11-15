@@ -20,9 +20,12 @@
 #include "settings.h"
 #include "ui.h"
 #include "viz.h"
+#include "webdavsettings.h"
+#include "webdavui.h"
 typedef enum {
     ACT_RELOAD = 0,
     ACT_OPEN_CONFIG,
+    ACT_WEBDAV,
     ACT_VOLUME_MENU,
     ACT_OUTPUT_MENU,
     ACT_VIZ_MENU,
@@ -247,10 +250,19 @@ static void palette_show_root(gboolean clear_query)
     g_autofree gchar *rep  = g_strdup(config_repeat_name(app.repeat));
     g_autofree gchar *shuf = g_strdup(app.shuffle ? "on" : "off");
     g_autofree gchar *lrc  = g_strdup_printf("%+d ms", app.lrc_offset_ms);
+    WebDavSettings webdav;
+    g_autofree gchar *webdav_detail = NULL;
+
+    webdav_settings_load(&webdav);
+    webdav_detail = g_strdup(webdav_settings_valid(&webdav)
+                             ? "已配置" : "未配置");
+    webdav_settings_clear(&webdav);
+
     begin_menu(MENU_ROOT, "输入命令，Enter 执行，Esc 关闭", clear_query);
     add_item("Reload config.ini", "重新读取 src/config.ini", ACT_RELOAD, NULL);
     add_item("Open config file...", "用默认编辑器打开 src/config.ini",
              ACT_OPEN_CONFIG, NULL);
+    add_item("WebDAV backup...", webdav_detail, ACT_WEBDAV, NULL);
     add_item("Audio volume...", vol, ACT_VOLUME_MENU, NULL);
     add_item("Audio output...", out, ACT_OUTPUT_MENU, NULL);
     add_item("Visualizer...", viz_effect_name(), ACT_VIZ_MENU, NULL);
@@ -358,6 +370,10 @@ static void run_item(PaletteItem *item)
         palette_close();
         break;
     }
+    case ACT_WEBDAV:
+        palette_close();
+        webdav_ui_open();
+        break;
     case ACT_VOLUME_MENU:
         palette_show_volume(TRUE);
         break;

@@ -21,5 +21,6 @@
 #include "playlist.h"
 #include "stage.h"
 #include "ui.h"
+#include "webdavui.h"
 
 #endif

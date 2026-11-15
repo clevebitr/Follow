@@ -283,6 +283,19 @@ const APPconfig *config_get(void)
     return &g_config;
 }
 
+const gchar *config_active_path(void)
+{
+    const gchar *env = g_getenv("FOLLOW_CONFIG");
+
+    if (env != NULL && *env != '\0')
+        return env;
+
+    if (g_file_test("src/config.local.ini", G_FILE_TEST_IS_REGULAR))
+        return "src/config.local.ini";
+
+    return "src/config.ini";
+}
+
 static void config_load_tracks(GKeyFile *kf, APPconfig *cfg)
 {
     g_auto(GStrv) groups = NULL;

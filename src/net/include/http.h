@@ -40,6 +40,12 @@ int  http_get_with_headers(const char *url, const char *headers,
 int  http_post_with_headers(const char *url, const char *body, const char *headers,
                             HttpResponse *resp, long timeout_sec);
 
+/* 通用同步请求：方法 / 二进制 body / 可选 Basic/Digest 认证。 */
+int  http_request_ex(const char *method, const char *url,
+                     const void *body, size_t body_len,
+                     const char *headers, const char *userpwd,
+                     HttpResponse *resp, long timeout_sec);
+
 /* 释放响应；可重复调用。 */
 void http_response_free(HttpResponse *resp);
 

@@ -39,6 +39,10 @@ set(FOLLOW_PKGS
     libswresample
     libavutil)
 
+if(UNIX AND NOT APPLE)
+    list(APPEND FOLLOW_PKGS libsecret-1)
+endif()
+
 pkg_check_modules(FOLLOW_DEPS REQUIRED IMPORTED_TARGET ${FOLLOW_PKGS})
 
 # 选项
@@ -72,7 +76,7 @@ if(WIN32)
     target_include_directories(follow PRIVATE "${PROJECT_SOURCE_DIR}/src/icons")
 
     # Windows 11：去掉 DWM 默认的 1px 边框 / 圆角
-    target_link_libraries(follow PRIVATE dwmapi)
+    target_link_libraries(follow PRIVATE dwmapi advapi32)
     set_target_properties(follow PROPERTIES WIN32_EXECUTABLE ${FOLLOW_WIN_GUI})
 endif()
 

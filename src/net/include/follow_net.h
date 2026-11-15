@@ -21,6 +21,7 @@
 #include "musicbrainz.h"
 #include "resolvecache.h"
 #include "source.h"
+#include "webdav.h"
 #include "youtube.h"
 
 #endif

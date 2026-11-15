@@ -7,3 +7,4 @@ crates/*/target/
 _CPack_Packages/
 *.back
 src/config.local.ini
+build-gdb

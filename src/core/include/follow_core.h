@@ -18,10 +18,12 @@
 #include "cache.h"
 #include "config.h"
 #include "keymap.h"
+#include "keyring.h"
 #include "palette.h"
 #include "platform.h"
 #include "settings.h"
 #include "stats.h"
 #include "texture.h"
+#include "webdavsettings.h"
 
 #endif
